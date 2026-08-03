@@ -49,13 +49,14 @@ workspace "wren"
 
 project "wren"
   kind "StaticLib"
-  language "C"
-  cdialect "C99"
+  language "C++"
+  cppdialect "C++20"
   targetdir "../../lib"
 
   files {
     "../../src/**.h",
-    "../../src/**.c"
+    "../../src/**.hpp",
+    "../../src/**.cpp"
   }
 
   includedirs {
@@ -67,13 +68,14 @@ project "wren"
 project "wren_shared"
   kind "SharedLib"
   targetname "wren"
-  language "C"
-  cdialect "C99"
+  language "C++"
+  cppdialect "C++20"
   targetdir "../../lib"
 
   files {
     "../../src/**.h",
-    "../../src/**.c"
+    "../../src/**.hpp",
+    "../../src/**.cpp"
   }
 
   includedirs {
@@ -84,17 +86,17 @@ project "wren_shared"
 
 project "wren_test"
   kind "ConsoleApp"
-  language "C"
-  cdialect "C99"
+  language "C++"
+  cppdialect "C++20"
   targetdir "../../bin"
   dependson "wren"
   links { "wren" }
 
   files {
-    "../../test/main.c",
-    "../../test/test.c",
+    "../../test/main.cpp",
+    "../../test/test.cpp",
     "../../test/test.h",
-    "../../test/api/*.c",
+    "../../test/api/*.cpp",
     "../../test/api/*.h"
   }
 

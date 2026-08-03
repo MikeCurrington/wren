@@ -66,8 +66,8 @@ add_file(join(WREN_DIR, 'src', 'include', 'wren.h'))
 # Must be included here because of conditional compilation.
 add_file(join(WREN_DIR, 'src', 'vm', 'wren_debug.h'))
 
-for f in iglob(join(WREN_DIR, 'src', 'vm', '*.c')):
+for f in iglob(join(WREN_DIR, 'src', 'vm', '*.cpp')):
   add_file(f)
 
-for f in iglob(join(WREN_DIR, 'src', 'optional', '*.c')):
+for f in iglob(join(WREN_DIR, 'src', 'optional', '*.cpp')):
   add_file(f)
