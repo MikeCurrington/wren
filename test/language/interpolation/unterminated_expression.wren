@@ -1,2 +1,2 @@
-// expect error line 2
+// expect error line 3
 " %(123"

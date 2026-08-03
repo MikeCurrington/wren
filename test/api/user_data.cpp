@@ -6,7 +6,7 @@ static const char* data = "my user data";
 static const char* otherData = "other user data";
 
 void* testReallocateFn(void* ptr, size_t newSize, void* userData) {
-  if (strcmp(userData, data) != 0) return NULL;
+  if (strcmp((const char*)userData, data) != 0) return NULL;
 
   if (newSize == 0)
   {

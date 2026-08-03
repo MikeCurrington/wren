@@ -9,10 +9,14 @@
 // This header is *not* intended to be included by code outside of Wren itself.
 
 // Wren pervasively uses the C99 integer types (uint16_t, etc.) along with some
-// of the associated limit constants (UINT32_MAX, etc.). The constants are not
-// part of standard C++, so aren't included by default by C++ compilers when you
-// include <stdint> unless __STDC_LIMIT_MACROS is defined.
-#define __STDC_LIMIT_MACROS
+// of the associated limit constants (UINT32_MAX, etc.).
+//
+// In C++, these constants are always available from <cstdint>. In C, we need
+// the __STDC_LIMIT_MACROS define (for pre-C11 compilers) to get them from
+// <stdint.h>.
+#ifndef __cplusplus
+  #define __STDC_LIMIT_MACROS
+#endif
 #include <stdint.h>
 
 // These flags let you control some details of the interpreter's implementation.
@@ -141,8 +145,10 @@
 
 // This is used to clearly mark flexible-sized arrays that appear at the end of
 // some dynamically-allocated structs, known as the "struct hack".
-#if __STDC_VERSION__ >= 199901L
-  // In C99, a flexible array member is just "[]".
+//
+// Both C99+ and C++ support flexible array members using empty brackets.
+#if (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 199901L) || defined(__cplusplus)
+  // In C99+ and C++, a flexible array member is just "[]".
   #define FLEXIBLE_ARRAY
 #else
   // Elsewhere, use a zero-sized array. It's technically undefined behavior,

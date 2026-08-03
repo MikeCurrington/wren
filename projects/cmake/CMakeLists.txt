@@ -3,7 +3,7 @@ project (Wren
     VERSION 0.4.0
     DESCRIPTION "Wren: A small, fast, class-based concurrent scripting language"
     HOMEPAGE_URL "https://github.com/wren-lang/wren"
-    LANGUAGES C
+    LANGUAGES C CXX
 )
 
 # Options
@@ -20,8 +20,8 @@ endif()
 
 # Source Files
 set(WREN_SRC ${CMAKE_CURRENT_SOURCE_DIR}/../../src)
-file(GLOB WREN_SRC_VM_FILES ${WREN_SRC}/vm/*.c)
-file(GLOB WREN_SRC_OPTIONAL_FILES ${WREN_SRC}/optional/*.c)
+file(GLOB WREN_SRC_VM_FILES ${WREN_SRC}/vm/*.cpp)
+file(GLOB WREN_SRC_OPTIONAL_FILES ${WREN_SRC}/optional/*.cpp)
 set(WREN_SRC_FILES ${WREN_SRC_VM_FILES} ${WREN_SRC_OPTIONAL_FILES})
 set(WREN_INCLUDE_DIRS
     ${WREN_SRC}/include
@@ -37,6 +37,11 @@ endif()
 if (WREN_RANDOM)
     list(APPEND WREN_DEFINES WREN_OPT_RANDOM)
 endif()
+
+# C++20 standard settings
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Wren Libraries
 if (WREN_BUILD_STATIC)
@@ -57,10 +62,10 @@ if(WREN_BUILD_TEST AND WREN_BUILD_STATIC)
     set(CTEST_CUSTOM_TESTS_IGNORE pkg-config--static)
 
     set(WREN_TEST ${WREN_SRC}/../test)
-    file(GLOB WREN_TEST_FILES ${WREN_TEST}/api/*.c)
+    file(GLOB WREN_TEST_FILES ${WREN_TEST}/api/*.cpp)
     list(APPEND WREN_TEST_FILES
-        ${WREN_TEST}/main.c
-        ${WREN_TEST}/test.c
+        ${WREN_TEST}/main.cpp
+        ${WREN_TEST}/test.cpp
     )
 
     add_executable(wren_test ${WREN_TEST_FILES})

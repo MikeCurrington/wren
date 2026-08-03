@@ -5,6 +5,10 @@
 #include <stdlib.h>
 #include <stdbool.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // The Wren semantic version number components.
 #define WREN_VERSION_MAJOR 0
 #define WREN_VERSION_MINOR 4
@@ -550,5 +554,9 @@ WREN_API void* wrenGetUserData(WrenVM* vm);
 
 // Sets user data associated with the WrenVM.
 WREN_API void wrenSetUserData(WrenVM* vm, void* userData);
+
+#ifdef __cplusplus
+} // extern "C"
+#endif
 
 #endif
