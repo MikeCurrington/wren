@@ -23,12 +23,12 @@ static int testsFailed = 0;
 
 // Test classes for C++ bindings
 
-class Point {
+class PointDouble {
 public:
   double x, y, z;
   
-  Point() : x(0), y(0), z(0) {}
-  Point(double x, double y, double z) : x(x), y(y), z(z) {}
+  PointDouble() : x(0), y(0), z(0) {}
+  PointDouble(double x, double y, double z) : x(x), y(y), z(z) {}
   
   double length() const {
     return sqrt(x*x + y*y + z*z);
@@ -36,9 +36,51 @@ public:
   
   double getX() const { return x; }
   void setX(double v) { x = v; }
-  
-  static Point origin() { return Point(0, 0, 0); }
+
+  // Takes another PointDouble as a foreign parameter
+  double distanceTo(const PointDouble& other) const {
+    double dx = x - other.x;
+    double dy = y - other.y;
+    double dz = z - other.z;
+    return sqrt(dx*dx + dy*dy + dz*dz);
+  }
+
+  static PointDouble origin() { return PointDouble(0, 0, 0); }
 };
+
+class PointFloat {
+public:
+  float x, y, z;
+  
+  PointFloat() : x(0), y(0), z(0) {}
+  PointFloat(float x, float y, float z) : x(x), y(y), z(z) {}
+  
+  float length() const {
+    return sqrtf(x*x + y*y + z*z);
+  }
+  
+  float getX() const { return x; }
+  void setX(float v) { x = v; }
+
+  // Takes another PointFloat as a foreign parameter
+  float distanceTo(const PointFloat& other) const {
+    float dx = x - other.x;
+    float dy = y - other.y;
+    float dz = z - other.z;
+    return sqrtf(dx*dx + dy*dy + dz*dz);
+  }
+
+  static PointFloat origin() { return PointFloat(0, 0, 0); }
+};
+
+class PointInt {
+public:
+  int x, y, z;
+  
+  PointInt() : x(0), y(0), z(0) {}
+  PointInt(int x, int y, int z) : x(x), y(y), z(z) {}
+  int getX() const { return x; }
+  };
 
 class Calculator {
 public:
@@ -105,11 +147,11 @@ int main() {
   {
     printf("Test 1: Basic foreign class with default constructor\n");
     auto& math = vm.module("test_basic");
-    auto point = math.klass<Point>("Point");
+    auto point = math.klass<PointDouble>("Point");
     point.ctor<>();
-    point.func<&Point::length>("length");
-    point.func<&Point::getX>("getX");
-    point.func<&Point::setX, double>("setX");
+    point.func<&PointDouble::length>("length");
+    point.func<&PointDouble::getX>("getX");
+    point.func<&PointDouble::setX, double>("setX");
   }
   
   const char* test1Source = R"WREN(
@@ -132,10 +174,10 @@ System.print("length after setX: %(p.length)")
   {
     printf("Test 2: Foreign class with parameterized constructor\n");
     auto& math = vm.module("test_constructor");
-    auto point = math.klass<Point>("Point");
+    auto point = math.klass<PointDouble>("Point");
     point.ctor<>();
     point.ctor<double, double, double>();
-    point.func<&Point::length>("length");
+    point.func<&PointDouble::length>("length");
   }
   
   const char* test2Source = R"WREN(
@@ -156,10 +198,10 @@ System.print("3-4-0 length: %(p2.length)")
   {
     printf("Test 3: Static methods\n");
     auto& math = vm.module("test_static");
-    auto point = math.klass<Point>("Point");
+    auto point = math.klass<PointDouble>("Point");
     point.ctor<>();
-    point.funcStatic<&Point::origin>("origin");
-    point.func<&Point::length>("length");
+    point.funcStatic<&PointDouble::origin>("origin");
+    point.func<&PointDouble::length>("length");
   }
   
   const char* test3Source = R"WREN(
@@ -177,9 +219,9 @@ System.print("origin length: %(p.length)")
   {
     printf("Test 4: Properties with getters and setters\n");
     auto& math = vm.module("test_properties");
-    auto point = math.klass<Point>("Point");
+    auto point = math.klass<PointDouble>("Point");
     point.ctor<>();
-    point.prop<&Point::getX, &Point::setX, double>("x");
+    point.prop<&PointDouble::getX, &PointDouble::setX>("x");
   }
   
   const char* test4Source = R"WREN(
@@ -200,9 +242,9 @@ System.print("set x: %(p.x)")
   {
     printf("Test 5: Read-only properties\n");
     auto& math = vm.module("test_readonly");
-    auto point = math.klass<Point>("Point");
+    auto point = math.klass<PointDouble>("Point");
     point.ctor<double, double, double>();
-    point.propReadonly<&Point::length>("length");
+    point.propReadonly<&PointDouble::length>("length");
   }
   
   const char* test5Source = R"WREN(
@@ -255,11 +297,13 @@ System.print("is adult: %(p.isAdult())")
   const char* test7Source = R"WREN(
 import "test_finalizer" for Resource
 
-var r1 = Resource.new(1)
-System.print("resource1 id: %(r1.getId())")
+{
+  var r1 = Resource.new(1)
+  System.print("resource1 id: %(r1.getId())")
 
-var r2 = Resource.new(2)
-System.print("resource2 id: %(r2.getId())")
+  var r2 = Resource.new(2)
+  System.print("resource2 id: %(r2.getId())")
+}
 )WREN";
   
   result = vm.interpret("test7", test7Source);
@@ -320,6 +364,119 @@ System.print("pi: %(Calculator.pi())")
   TEST_ASSERT(result == WREN_RESULT_SUCCESS, "Static methods test");
   printf("\n");
   
+  // Test 10: Passing foreign types as parameters
+  {
+    printf("Test 10: Passing foreign types as parameters\n");
+    auto& math = vm.module("test_foreign_params");
+    auto point = math.klass<PointDouble>("Point");
+    point.ctor<>();
+    point.ctor<double, double, double>();
+    point.func<&PointDouble::length>("length");
+    point.func<&PointDouble::distanceTo, PointDouble>("distanceTo");
+  }
+
+  const char* test10Source = R"WREN(
+import "test_foreign_params" for Point
+
+var p1 = Point.new(0.0, 0.0, 0.0)
+var p2 = Point.new(3.0, 4.0, 0.0)
+
+System.print("p1 length: %(p1.length)")
+System.print("p2 length: %(p2.length)")
+System.print("distance: %(p1.distanceTo(p2))")
+)WREN";
+
+  result = vm.interpret("test10", test10Source);
+  TEST_ASSERT(result == WREN_RESULT_SUCCESS, "Foreign parameter passing test");
+  printf("\n");
+  
+  // Test 11: PointFloat class (single precision)
+  {
+    printf("Test 11: PointFloat class (single precision)\n");
+    auto& floatMod = vm.module("test_float");
+    auto pointFloat = floatMod.klass<PointFloat>("PointFloat");
+    pointFloat.ctor<>();
+    pointFloat.ctor<float, float, float>();
+    pointFloat.func<&PointFloat::length>("length");
+    pointFloat.func<&PointFloat::getX>("getX");
+    pointFloat.func<&PointFloat::setX, float>("setX");
+    pointFloat.varReadOnly<&PointFloat::y>("y");
+    pointFloat.func<&PointFloat::distanceTo, PointFloat>("distanceTo");
+    pointFloat.funcStatic<&PointFloat::origin>("origin");
+  }
+
+  const char* test11Source = R"WREN(
+import "test_float" for PointFloat
+
+var p1 = PointFloat.new(1.5, 2.5, 0.0)
+var p2 = PointFloat.new(4.5, 6.5, 0.0)
+
+System.print("p1 length: %(p1.length)")
+System.print("p1 x: %(p1.getX)")
+System.print("p2 y: %(p2.y) (expect 4)")
+
+p1.setX(3.5)
+System.print("p1 x after setX: %(p1.getX)")
+
+System.print("p2 length: %(p2.length)")
+System.print("distance: %(p1.distanceTo(p2))")
+
+var origin = PointFloat.origin()
+System.print("origin length: %(origin.length)")
+)WREN";
+
+  result = vm.interpret("test11", test11Source);
+  TEST_ASSERT(result == WREN_RESULT_SUCCESS, "PointFloat class test");
+  printf("\n");
+
+  class PointIntExt
+  {
+    public:
+      static auto getX(PointInt& p) { return p.x; }
+      static void setX(PointInt& p, int y) { p.x = y; }
+      static auto getY(PointInt& p) { return p.y; }
+  };
+
+  // Test 12: PointFloatExt class (use external functions to access a class)
+  {
+    printf("Test 12: PointInt class (integer point, but access through external functions)\n");
+    auto& floatMod = vm.module("test_int_ext");
+    auto pointInt = floatMod.klass<PointInt>("PointInt");
+    pointInt.ctor<>();
+    pointInt.ctor<int, int, int>();
+    pointInt.funcExt<&PointIntExt::getX>("getX");
+    pointInt.propExt<&PointIntExt::getX, &PointIntExt::setX>("x");
+    pointInt.propExtReadonly<&PointIntExt::getY>("y");
+    // pointFloat.func<&PointIntExt::length>("length");
+    // pointFloat.func<&PointIntExt::getX>("getX");
+    // pointFloat.func<&PointIntExt::setX, float>("setX");
+    // pointFloat.func<&PointIntExt::distanceTo, PointFloat>("distanceTo");
+    // pointFloat.funcStatic<&PointFloat::origin>("origin");
+  }
+const char* test12Source = R"WREN(
+import "test_int_ext" for PointInt
+
+var p1 = PointInt.new(1, 2, 0.0)
+var p2 = PointInt.new(4, 6, 0.0)
+
+// System.print("p1 length: %(p1.length)")
+System.print("p1 x: %(p1.getX)")
+System.print("p1 y: %(p1.y)")
+
+p1.x = 3
+System.print("p1 x after x assignment: %(p1.getX)")
+
+// System.print("p2 length: %(p2.length)")
+// System.print("distance: %(p1.distanceTo(p2))")
+
+// var origin = PointFloatExt.origin()
+// System.print("origin length: %(origin.length)")
+)WREN";
+
+  result = vm.interpret("test12", test12Source);
+  TEST_ASSERT(result == WREN_RESULT_SUCCESS, "External class test");
+  printf("\n");
+
   // Summary
   printf("=====================================\n");
   printf("C++20 Foreign Binding Tests Complete\n");

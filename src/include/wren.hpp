@@ -5,17 +5,23 @@
 //
 // This header provides:
 //   - Fluent module/class/method registration (wrenbind17/pybind11 inspired)
-//   - Type-safe foreign object storage via templates
+//   - Type-safe foreign object storage via shared_ptr wrappers
 //   - RAII handles and VM lifecycle management
 //   - Type-safe slot access with automatic conversions
+//   - Safe cross-language object lifetime management
 //
 // The underlying VM (NaN-boxing, GC, bytecode) is unchanged. This layer wraps
 // the raw C API with modern C++20 ergonomics.
 //
-// Key design: Template-generated static trampoline functions serve as the
-// C function pointers that Wren's VM expects (WrenForeignMethodFn, etc.).
-// Each unique <method-pointer, Class, Args...> instantiation generates a
-// unique function address, enabling zero-overhead dispatch.
+// Key design: Foreign objects are stored as ForeignWrapper (shared_ptr + type tag)
+// inside Wren's foreign slots. This enables:
+//   - Safe shared ownership across the C++↔Wren boundary
+//   - Runtime type checking when extracting foreign arguments
+//   - Passing registered foreign types as method parameters
+//
+// Template-generated static trampoline functions serve as the C function pointers
+// that Wren's VM expects. Each unique <method-pointer, Class, Args...> instantiation
+// generates a unique function address, enabling zero-overhead dispatch.
 
 #include <cstddef>
 #include <cstdint>
@@ -25,6 +31,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <typeinfo>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -53,7 +60,7 @@ struct ClassReg {
   std::string className;
   WrenForeignMethodFn allocator = nullptr;
   WrenFinalizerFn finalizer = nullptr;
-  std::string ctorSig;
+  std::vector<int> ctorArgCounts;
   std::vector<MethodReg> methods;
   std::string wrenSource;
 };
@@ -67,9 +74,38 @@ struct ModuleReg {
 namespace detail {
 
 // ===========================================================================
+// ForeignWrapper — stored inside Wren's foreign slot for every C++20-managed
+// foreign object. Contains a shared_ptr to the actual object and a type tag
+// for runtime type checking.
+// ===========================================================================
+struct ForeignWrapper {
+  std::shared_ptr<void> obj;
+  const std::type_info* type = nullptr;
+
+  ForeignWrapper() = default;
+
+  template <typename T, typename... Args>
+  static ForeignWrapper make(Args&&... args) {
+    ForeignWrapper w;
+    w.obj = std::make_shared<T>(std::forward<Args>(args)...);
+    w.type = &typeid(T);
+    return w;
+  }
+
+  // Create a wrapper that shares ownership of an existing shared_ptr
+  template <typename T>
+  static ForeignWrapper share(std::shared_ptr<T> ptr) {
+    ForeignWrapper w;
+    w.obj = std::move(ptr);
+    w.type = &typeid(T);
+    return w;
+  }
+};
+
+// ===========================================================================
 // Type converters: C++ type <-> Wren slot
 // ===========================================================================
-template <typename T> struct Converter;
+template <typename T, typename = void> struct Converter;
 
 template <> struct Converter<double> {
   static double get(WrenVM* vm, int slot) { return wrenGetSlotDouble(vm, slot); }
@@ -83,17 +119,12 @@ template <> struct Converter<bool> {
   static bool get(WrenVM* vm, int slot) { return wrenGetSlotBool(vm, slot); }
   static void set(WrenVM* vm, int slot, bool v) { wrenSetSlotBool(vm, slot, v); }
 };
-template <> struct Converter<int32_t> {
-  static int32_t get(WrenVM* vm, int slot) { return static_cast<int32_t>(wrenGetSlotDouble(vm, slot)); }
-  static void set(WrenVM* vm, int slot, int32_t v) { wrenSetSlotDouble(vm, slot, static_cast<double>(v)); }
-};
-template <> struct Converter<int64_t> {
-  static int64_t get(WrenVM* vm, int slot) { return static_cast<int64_t>(wrenGetSlotDouble(vm, slot)); }
-  static void set(WrenVM* vm, int slot, int64_t v) { wrenSetSlotDouble(vm, slot, static_cast<double>(v)); }
-};
-template <> struct Converter<uint32_t> {
-  static uint32_t get(WrenVM* vm, int slot) { return static_cast<uint32_t>(wrenGetSlotDouble(vm, slot)); }
-  static void set(WrenVM* vm, int slot, uint32_t v) { wrenSetSlotDouble(vm, slot, static_cast<double>(v)); }
+
+// Generic converter for all integer types (int, long, short, char, unsigned, etc.)
+template <typename T>
+struct Converter<T, std::enable_if_t<std::is_integral_v<T>>> {
+  static T get(WrenVM* vm, int slot) { return static_cast<T>(wrenGetSlotDouble(vm, slot)); }
+  static void set(WrenVM* vm, int slot, T v) { wrenSetSlotDouble(vm, slot, static_cast<double>(v)); }
 };
 template <> struct Converter<std::string> {
   static std::string get(WrenVM* vm, int slot) {
@@ -123,41 +154,56 @@ template <> struct Converter<const char*> {
 // Helper concept for built-in convertible types
 template <typename T>
 inline constexpr bool isWrenBuiltin_v =
-  std::is_same_v<T, double> || std::is_same_v<T, float> ||
-  std::is_same_v<T, bool> ||
-  std::is_same_v<T, int32_t> || std::is_same_v<T, int64_t> ||
-  std::is_same_v<T, uint32_t> ||
+  std::is_arithmetic_v<T> ||
   std::is_same_v<T, std::string> ||
   std::is_same_v<T, std::string_view> ||
   std::is_same_v<T, const char*>;
 
 // ===========================================================================
-// Slot access helpers
+// Slot access helpers for foreign (wrapper-based) objects
 // ===========================================================================
 
+// Extract a typed reference from a foreign slot containing a ForeignWrapper.
 template <typename T>
 inline T& getForeign(WrenVM* vm, int slot) {
   void* data = wrenGetSlotForeign(vm, slot);
-  return *std::launder(reinterpret_cast<T*>(data));
+  auto* wrapper = std::launder(reinterpret_cast<ForeignWrapper*>(data));
+  return *static_cast<T*>(wrapper->obj.get());
 }
 
+// Extract a shared_ptr from a foreign slot — for shared ownership scenarios.
 template <typename T>
-inline T getArg(WrenVM* vm, int slot) {
-  if constexpr (isWrenBuiltin_v<T>) {
-    return Converter<T>::get(vm, slot);
+inline std::shared_ptr<T> getForeignShared(WrenVM* vm, int slot) {
+  void* data = wrenGetSlotForeign(vm, slot);
+  auto* wrapper = std::launder(reinterpret_cast<ForeignWrapper*>(data));
+  return std::static_pointer_cast<T>(wrapper->obj);
+}
+
+// Generic argument getter — handles builtins, foreign by-value/ref/ptr.
+template <typename T>
+inline auto getArg(WrenVM* vm, int slot) {
+  using D = std::decay_t<T>;
+  if constexpr (isWrenBuiltin_v<D>) {
+    return Converter<D>::get(vm, slot);
+  } else if constexpr (std::is_pointer_v<D>) {
+    // Pointer argument: return address of the foreign object
+    using PointedTo = std::remove_pointer_t<D>;
+    return &getForeign<PointedTo>(vm, slot);
   } else {
-    return getForeign<T>(vm, slot);
+    // Reference or value: return reference, caller copies if needed
+    return getForeign<D>(vm, slot);
   }
 }
 
+// Place a foreign return value into slot 0, wrapping it in a ForeignWrapper.
 template <typename T>
 inline void setReturn(WrenVM* vm, T&& value) {
   using D = std::decay_t<T>;
   if constexpr (isWrenBuiltin_v<D>) {
     Converter<D>::set(vm, 0, std::forward<T>(value));
   } else {
-    void* data = wrenSetSlotNewForeign(vm, 0, 0, sizeof(D));
-    new (data) D(std::forward<T>(value));
+    void* data = wrenSetSlotNewForeign(vm, 0, 0, sizeof(ForeignWrapper));
+    new (data) ForeignWrapper(ForeignWrapper::make<D>(std::forward<T>(value)));
   }
 }
 
@@ -179,7 +225,7 @@ void memberTrampoline(WrenVM* vm) {
     }
   } else {
     // Unpack arguments: slot 0 = receiver, slots 1..N = args
-    [obj, vm]<std::size_t... Is>(std::index_sequence<Is...>) {
+    [&obj, vm]<std::size_t... Is>(std::index_sequence<Is...>) {
       if constexpr (std::is_void_v<std::invoke_result_t<decltype(Fn), Class&, Args...>>) {
         (obj.*Fn)(getArg<Args>(vm, static_cast<int>(Is) + 1)...);
       } else {
@@ -220,6 +266,34 @@ void getterTrampoline(WrenVM* vm) {
   }
 }
 
+// --- Setter value-type deduction ---
+// Deduce the value type written by a property setter so users don't have to
+// pass it explicitly (mirrors var()'s automatic member-type deduction):
+//   free/static function  R (*)(C, V)  -> V
+//   member function       R (C::*)(V) -> V  (const/noexcept variants included)
+//   member object         R C::*      -> R
+// Unsupported setter shapes fail to compile with an incomplete-type error.
+template <typename S>
+struct setter_value;  // intentionally undefined
+
+template <typename R, typename C, typename V>
+struct setter_value<R (*)(C, V)> { using type = V; };
+template <typename R, typename C, typename V>
+struct setter_value<R (*)(C, V) noexcept> { using type = V; };
+template <typename R, typename C, typename V>
+struct setter_value<R (C::*)(V)> { using type = V; };
+template <typename R, typename C, typename V>
+struct setter_value<R (C::*)(V) const> { using type = V; };
+template <typename R, typename C, typename V>
+struct setter_value<R (C::*)(V) noexcept> { using type = V; };
+template <typename R, typename C, typename V>
+struct setter_value<R (C::*)(V) const noexcept> { using type = V; };
+template <typename R, typename C>
+struct setter_value<R C::*> { using type = R; };
+
+template <typename S>
+using setter_value_t = typename setter_value<S>::type;
+
 // --- Property setter trampoline ---
 template <auto Setter, typename Class, typename ValType>
 void setterTrampoline(WrenVM* vm) {
@@ -231,24 +305,85 @@ void setterTrampoline(WrenVM* vm) {
   }
 }
 
-// --- Constructor (allocator) trampoline ---
+  // --- External function trampoline (funcExt) ---
+  // Calls a free function, passing the foreign object as the first argument.
+  // This allows extending a class with non-member functions, like wrenbind17's funcExt.
+  template <auto Fn, typename Class, typename... Args>
+  void funcExtTrampoline(WrenVM* vm) {
+    Class& obj = getForeign<Class>(vm, 0);
+    if constexpr (sizeof...(Args) == 0) {
+      if constexpr (std::is_void_v<std::invoke_result_t<decltype(Fn), Class&>>) {
+        Fn(obj);
+      } else {
+        setReturn(vm, Fn(obj));
+      }
+    } else {
+      [&obj, vm]<std::size_t... Is>(std::index_sequence<Is...>) {
+        if constexpr (std::is_void_v<std::invoke_result_t<decltype(Fn), Class&, Args...>>) {
+          Fn(obj, getArg<Args>(vm, static_cast<int>(Is) + 1)...);
+        } else {
+          setReturn(vm, Fn(obj, getArg<Args>(vm, static_cast<int>(Is) + 1)...));
+        }
+      }(std::index_sequence_for<Args...>{});
+    }
+  }
+
+  // --- External property getter trampoline (propExt read-only) ---
+  // Calls a free function taking the foreign object, returning its result.
+  template <auto Getter, typename Class>
+  void propExtGetterTrampoline(WrenVM* vm) {
+    Class& obj = getForeign<Class>(vm, 0);
+    setReturn(vm, Getter(obj));
+  }
+
+  // --- External property setter trampoline (propExt write) ---
+  // Calls a free function taking the foreign object and the new value.
+  template <auto Setter, typename Class, typename ValType>
+  void propExtSetterTrampoline(WrenVM* vm) {
+    Class& obj = getForeign<Class>(vm, 0);
+    Setter(obj, getArg<ValType>(vm, 1));
+  }
+
+  // --- Constructor (allocator) trampoline ---
+// Creates a shared_ptr<T> and stores it in a ForeignWrapper in the foreign slot.
 template <typename T, typename... Args>
 void ctorTrampoline(WrenVM* vm) {
   wrenEnsureSlots(vm, static_cast<int>(sizeof...(Args)) + 1);
-  void* data = wrenSetSlotNewForeign(vm, 0, 0, sizeof(T));
+  void* data = wrenSetSlotNewForeign(vm, 0, 0, sizeof(ForeignWrapper));
   if constexpr (sizeof...(Args) == 0) {
-    new (data) T();
+    new (data) ForeignWrapper(ForeignWrapper::make<T>());
   } else {
     [data, vm]<std::size_t... Is>(std::index_sequence<Is...>) {
-      new (data) T(getArg<Args>(vm, static_cast<int>(Is) + 1)...);
+      new (data) ForeignWrapper(ForeignWrapper::make<T>(
+        getArg<Args>(vm, static_cast<int>(Is) + 1)...));
     }(std::index_sequence_for<Args...>{});
   }
 }
 
 // --- Finalizer (destructor) trampoline ---
+// All foreign objects use the same finalizer: destruct the ForeignWrapper,
+// which resets the shared_ptr (and destructs the C++ object if refcount hits 0).
 template <typename T>
 void finalizeTrampoline(void* data) {
-  std::launder(reinterpret_cast<T*>(data))->~T();
+  std::launder(reinterpret_cast<ForeignWrapper*>(data))->~ForeignWrapper();
+}
+
+// --- Constructor registry: maps arg count -> constructor trampoline, per type ---
+template <typename T>
+struct CtorRegistry {
+  static std::unordered_map<int, WrenForeignMethodFn> ctors;
+};
+template <typename T>
+std::unordered_map<int, WrenForeignMethodFn> CtorRegistry<T>::ctors;
+
+// --- Constructor dispatcher: selects the right constructor based on slot count ---
+template <typename T>
+void ctorDispatcher(WrenVM* vm) {
+  int numArgs = wrenGetSlotCount(vm) - 1; // slot 0 is receiver
+  auto it = CtorRegistry<T>::ctors.find(numArgs);
+  if (it != CtorRegistry<T>::ctors.end()) {
+    it->second(vm);
+  }
 }
 
 // ===========================================================================
@@ -333,8 +468,12 @@ public:
 
   template <typename... Args>
   Foreign<T>& ctor() {
-    reg_.allocator = &detail::ctorTrampoline<T, Args...>;
-    reg_.ctorSig = detail::makeCtorSig(reg_.className, sizeof...(Args));
+    detail::CtorRegistry<T>::ctors[static_cast<int>(sizeof...(Args))] = &detail::ctorTrampoline<T, Args...>;
+    reg_.allocator = &detail::ctorDispatcher<T>;
+    reg_.ctorArgCounts.push_back(static_cast<int>(sizeof...(Args)));
+    // With the shared_ptr wrapper, we always need a finalizer to destruct
+    // the ForeignWrapper. Auto-register it here.
+    reg_.finalizer = &detail::finalizeTrampoline<T>;
     return *this;
   }
 
@@ -368,8 +507,11 @@ public:
     return *this;
   }
 
-  template <auto Getter, auto Setter, typename ValType>
+  // Register a member function getter/setter pair as a read-write property.
+  // The value type is deduced from the setter's parameter.
+  template <auto Getter, auto Setter>
   Foreign<T>& prop(std::string_view name) {
+    using ValType = detail::setter_value_t<decltype(Setter)>;
     propReadonly<Getter>(name);
     reg_.methods.push_back({
       &detail::setterTrampoline<Setter, T, ValType>,
@@ -379,8 +521,80 @@ public:
     return *this;
   }
 
+  // Register a direct member variable as a read-only Wren property.
+  // Uses a member object pointer (e.g., &Point::x) to generate a getter.
+  template <auto MemberPtr>
+  Foreign<T>& varReadOnly(std::string_view name) {
+    reg_.methods.push_back({
+      &detail::getterTrampoline<MemberPtr, T>,
+      false,
+      detail::makeMethodSig(name, 0, false)
+    });
+    return *this;
+  }
+
+  // Register a direct member variable as a read-write Wren property.
+  // Uses a member object pointer (e.g., &Point::x) to generate both
+  // a getter and a setter. The member type is auto-deduced.
+  template <auto MemberPtr>
+  Foreign<T>& var(std::string_view name) {
+    using MemberType = std::decay_t<decltype(std::declval<T>().*MemberPtr)>;
+    varReadOnly<MemberPtr>(name);
+    reg_.methods.push_back({
+      &detail::setterTrampoline<MemberPtr, T, MemberType>,
+      false,
+      detail::makeSetterSig(name)
+    });
+    return *this;
+  }
+
+  // Register an external (free) function as a method on this class.
+  // The function receives the foreign object as its first argument.
+  // This mirrors wrenbind17's funcExt: `funcExt<&freeFunction, ArgTypes...>("name")`
+  template <auto Fn, typename... Args>
+  Foreign<T>& funcExt(std::string_view name) {
+    reg_.methods.push_back({
+      &detail::funcExtTrampoline<Fn, T, Args...>,
+      false,
+      detail::makeMethodSig(name, sizeof...(Args), false)
+    });
+    return *this;
+  }
+
+  // Register an external (free) function as a read-only property getter.
+  // The function receives the foreign object and returns the property value.
+  // This mirrors wrenbind17's propExt for read-only access.
+  template <auto Getter>
+  Foreign<T>& propExtReadonly(std::string_view name) {
+    reg_.methods.push_back({
+      &detail::propExtGetterTrampoline<Getter, T>,
+      false,
+      detail::makeMethodSig(name, 0, false)
+    });
+    return *this;
+  }
+
+  // Register external (free) functions as a read-write property.
+  // The getter receives the foreign object and returns the value.
+  // The setter receives the foreign object and the new value.
+  // This mirrors wrenbind17's propExt for read-write access.
+  // The value type is deduced from the setter's parameter.
+  template <auto Getter, auto Setter>
+  Foreign<T>& propExt(std::string_view name) {
+    using ValType = detail::setter_value_t<decltype(Setter)>;
+    propExtReadonly<Getter>(name);
+    reg_.methods.push_back({
+      &detail::propExtSetterTrampoline<Setter, T, ValType>,
+      false,
+      detail::makeSetterSig(name)
+    });
+    return *this;
+  }
+
+  // With shared_ptr wrappers, finalize() is automatically handled by ctor().
+  // This method is kept for API compatibility but is now a no-op.
   Foreign<T>& finalize() {
-    reg_.finalizer = &detail::finalizeTrampoline<T>;
+    // Already set in ctor() — nothing additional needed.
     return *this;
   }
 
@@ -409,14 +623,8 @@ public:
 
   void addClass(ClassReg reg) {
     std::string src = "foreign class " + reg.className + " {\n";
-    if (reg.allocator) {
-      // ctorSig is "ClassName(N)" where N is arg count.
-      // Parse N and generate "construct new(arg0, arg1, ...) {}"
-      auto parenPos = reg.ctorSig.find('(');
-      int numArgs = 0;
-      if (parenPos != std::string::npos) {
-        numArgs = std::stoi(reg.ctorSig.substr(parenPos + 1));
-      }
+    // Generate all registered constructor overloads.
+    for (int numArgs : reg.ctorArgCounts) {
       std::string ctorSrc = "  construct new(";
       for (int i = 0; i < numArgs; ++i) {
         if (i > 0) ctorSrc += ",";
@@ -425,11 +633,23 @@ public:
       ctorSrc += ") {}\n";
       src += ctorSrc;
     }
+    // Track which (isStatic, signature) pairs have already been emitted to
+    // avoid generating duplicate foreign method declarations in Wren source.
+    std::vector<std::pair<bool, std::string>> emitted;
     for (const auto& m : reg.methods) {
+      auto key = std::make_pair(m.isStatic, m.signature);
+      bool alreadyEmitted = false;
+      for (const auto& e : emitted) {
+        if (e == key) { alreadyEmitted = true; break; }
+      }
+      if (alreadyEmitted) continue;
+      emitted.push_back(key);
+
       // Add "static " prefix for static methods in Wren source
       std::string prefix = m.isStatic ? "static " : "";
       // Convert bind signature (e.g. "dot(_,_)") to Wren source (e.g. "dot(arg0,arg1)")
       std::string wrenSig = m.signature;
+      bool isZeroArg = (wrenSig.find('(') == std::string::npos);
       std::string::size_type pos = 0;
       int argIdx = 0;
       while ((pos = wrenSig.find('_', pos)) != std::string::npos) {
@@ -438,6 +658,11 @@ public:
         pos += argName.size();
       }
       src += "  foreign " + prefix + wrenSig + "\n";
+      // For 0-arg methods, also generate the "()" call form so both
+      // `obj.foo` (getter) and `obj.foo()` (method call) work.
+      if (isZeroArg) {
+        src += "  foreign " + prefix + wrenSig + "()\n";
+      }
     }
     src += "}\n";
     reg.wrenSource = src;
@@ -519,15 +744,34 @@ public:
   void* userData() const { return wrenGetUserData(vm_); }
   void setUserData(void* data) { wrenSetUserData(vm_, data); }
 
+  // Get a foreign object from a slot as a typed reference.
   template <typename T> T get(int slot) {
-    if constexpr (detail::isWrenBuiltin_v<T>) return detail::Converter<T>::get(vm_, slot);
-    else return detail::getForeign<T>(vm_, slot);
+    using D = std::decay_t<T>;
+    if constexpr (detail::isWrenBuiltin_v<D>) return detail::Converter<D>::get(vm_, slot);
+    else return detail::getForeign<D>(vm_, slot);
   }
 
+  // Get a shared_ptr to a foreign object — enables C++ to keep the object alive.
+  template <typename T>
+  std::shared_ptr<T> getShared(int slot) {
+    return detail::getForeignShared<T>(vm_, slot);
+  }
+
+  // Set a slot to a foreign object (copies/moves the value into a new wrapper).
   template <typename T> void set(int slot, T&& value) {
     using D = std::decay_t<T>;
     if constexpr (detail::isWrenBuiltin_v<D>) detail::Converter<D>::set(vm_, slot, std::forward<T>(value));
-    else { void* d = wrenSetSlotNewForeign(vm_, slot, slot, sizeof(D)); new (d) D(std::forward<T>(value)); }
+    else {
+      void* data = wrenSetSlotNewForeign(vm_, slot, slot, sizeof(detail::ForeignWrapper));
+      new (data) detail::ForeignWrapper(detail::ForeignWrapper::make<D>(std::forward<T>(value)));
+    }
+  }
+
+  // Set a slot from an existing shared_ptr — shares ownership, no copy.
+  template <typename T>
+  void setShared(int slot, std::shared_ptr<T> ptr) {
+    void* data = wrenSetSlotNewForeign(vm_, slot, slot, sizeof(detail::ForeignWrapper));
+    new (data) detail::ForeignWrapper(detail::ForeignWrapper::share<T>(std::move(ptr)));
   }
 
   void setNull(int slot) { wrenSetSlotNull(vm_, slot); }
@@ -544,8 +788,23 @@ private:
     if (it == self->modules_.end()) return nullptr;
     for (const auto& c : it->second->registration().classes) {
       if (c.className != cls) continue;
+      // Exact match first
       for (const auto& m : c.methods) {
         if (m.isStatic == isStatic && m.signature == sig) return m.fn;
+      }
+      // Fallback: Wren distinguishes getter "foo" from call "foo()" for 0-arg methods.
+      // Allow either form to match a 0-arg method registration.
+      std::string reqSig(sig);
+      std::string altSig;
+      if (reqSig.size() > 2 && reqSig.compare(reqSig.size() - 2, 2, "()") == 0) {
+        altSig = reqSig.substr(0, reqSig.size() - 2); // "foo()" -> "foo"
+      } else if (reqSig.find('(') == std::string::npos) {
+        altSig = reqSig + "()"; // "foo" -> "foo()"
+      }
+      if (!altSig.empty()) {
+        for (const auto& m : c.methods) {
+          if (m.isStatic == isStatic && m.signature == altSig) return m.fn;
+        }
       }
     }
     return nullptr;

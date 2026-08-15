@@ -60,7 +60,7 @@ int main() {
     vec.func<&Vec3::operator!=, Vec3>("!=");
 
     // Property with getter/setter
-    vec.prop<&Vec3::getX, &Vec3::setX, double>("x");
+    vec.prop<&Vec3::getX, &Vec3::setX>("x");
 
     // Static method
     vec.funcStatic<&Vec3::zero>("zero");

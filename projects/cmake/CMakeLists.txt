@@ -72,4 +72,10 @@ if(WREN_BUILD_TEST AND WREN_BUILD_STATIC)
     target_link_libraries(wren_test PUBLIC wren m)
 
     add_test(NAME wren_test COMMAND wren_test ${WREN_TEST}/core/system/print.wren)
-endif()
+    
+    # Standalone C++20 bindings test
+    add_executable(cpp20_bindings_test ${WREN_TEST}/cpp20_bindings_test.cpp)
+    target_link_libraries(cpp20_bindings_test PUBLIC wren m)
+    
+    add_test(NAME cpp20_bindings_test COMMAND cpp20_bindings_test)
+  endif()

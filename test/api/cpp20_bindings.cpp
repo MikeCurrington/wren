@@ -281,8 +281,6 @@ int cpp20BindingsRunTests(WrenVM* vm)
   testsPassed = 0;
   testsFailed = 0;
   
-  printf("Running Foreign Binding Tests...\n");
-  
   // Test 1: Basic foreign class with default constructor
   const char* test1Source = R"WREN(
 foreign class Point {
@@ -308,7 +306,7 @@ System.print("length after setX: %(p.length)") // expect: 3
   const char* test2Source = R"WREN(
 foreign class Point {
   construct new() {}
-  construct new(_,_,_) {}
+  construct new(x, y, z) {}
   foreign length
 }
 
@@ -325,12 +323,12 @@ System.print("3-4-0 length: %(p2.length)") // expect: 5
   // Test 3: Static methods
   const char* test3Source = R"WREN(
 foreign class Point {
-  construct new(_,_,_) {}
+  construct new(x, y, z) {}
   foreign static origin
   foreign length
 }
 
-var p = Point.origin()
+var p = Point.origin
 System.print("origin length: %(p.length)") // expect: 0
 )WREN";
   
@@ -343,14 +341,14 @@ System.print("origin length: %(p.length)") // expect: 0
   const char* test4Source = R"WREN(
 foreign class Person {
   construct new() {}
-  construct new(_,_) {}
+  construct new(name, age) {}
   foreign introduce
   foreign isAdult
 }
 
 var p = Person.new("Alice", 25)
-System.print(p.introduce()) // expect: I am Alice, age 25
-System.print("is adult: %(p.isAdult())") // expect: true
+System.print(p.introduce) // expect: I am Alice, age 25
+System.print("is adult: %(p.isAdult)") // expect: true
 )WREN";
   
   result = wrenInterpret(vm, "test4", test4Source);
@@ -360,15 +358,15 @@ System.print("is adult: %(p.isAdult())") // expect: true
   const char* test5Source = R"WREN(
 foreign class Resource {
   construct new() {}
-  construct new(_) {}
+  construct new(id) {}
   foreign getId
 }
 
 var r1 = Resource.new(1)
-System.print("resource1 id: %(r1.getId())") // expect: 1
+System.print("resource1 id: %(r1.getId)") // expect: 1
 
 var r2 = Resource.new(2)
-System.print("resource2 id: %(r2.getId())") // expect: 2
+System.print("resource2 id: %(r2.getId)") // expect: 2
 )WREN";
   
   result = wrenInterpret(vm, "test5", test5Source);
@@ -384,7 +382,7 @@ System.print("resource2 id: %(r2.getId())") // expect: 2
   const char* test6Source = R"WREN(
 foreign class Calculator {
   construct new() {}
-  construct new(_) {}
+  construct new(value) {}
   foreign add(_,_)
   foreign multiply(_,_)
   foreign getResult
@@ -392,21 +390,18 @@ foreign class Calculator {
 }
 
 var c1 = Calculator.new()
-System.print("default result: %(c1.getResult())") // expect: 0
+System.print("default result: %(c1.getResult)") // expect: 0
 
 var c2 = Calculator.new(42.0)
-System.print("custom result: %(c2.getResult())") // expect: 42
+System.print("custom result: %(c2.getResult)") // expect: 42
 
 System.print("add: %(c2.add(3, 4))") // expect: 7
 System.print("multiply: %(c2.multiply(3, 4))") // expect: 12
-System.print("pi: %(Calculator.pi())") // expect: 3.14159
+System.print("pi: %(Calculator.pi)") // expect: 3.14159
 )WREN";
   
   result = wrenInterpret(vm, "test6", test6Source);
   TEST_ASSERT(result == WREN_RESULT_SUCCESS, "Test 6: Multiple constructors and static methods");
-  
-  printf("Foreign Binding Tests Complete\n");
-  printf("Passed: %d, Failed: %d\n", testsPassed, testsFailed);
   
   return testsFailed;
 }

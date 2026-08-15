@@ -316,6 +316,21 @@ class StringCodePointSequence is Sequence {
 }
 
 class List is Sequence {
+  indexOf(value) {
+    var i = 0
+    while (i < count) {
+      if (this[i] == value) return i
+      i = i + 1
+    }
+    return -1
+  }
+
+  remove(value) {
+    var index = indexOf(value)
+    if (index == -1) return null
+    return removeAt(index)
+  }
+
   addAll(other) {
     for (element in other) {
       add(element)
