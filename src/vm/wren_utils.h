@@ -17,12 +17,20 @@ int wrenPowerOf2Ceil(int n);
 // type-specific instances that the old preprocessor macros generated, but
 // with type safety and ordinary method call syntax.
 //
-// Note: Wren heap objects are raw-allocated (see ALLOCATE in wren_common.h),
-// so a Buffer embedded in one is never constructed. Call init() explicitly
-// right after allocation, just like the old wrenXBufferInit() functions did.
+// Heap objects created with wrenConstruct() are constructed, so a Buffer
+// embedded in one initializes itself. For buffers living in memory that is
+// allocated but never constructed (inside WrenVM, the parser, and the
+// compiler), call init() explicitly right after allocation, just like the
+// old wrenXBufferInit() functions did.
 template <typename T>
 struct Buffer
 {
+  // Constructs an empty buffer.
+  Buffer()
+  {
+    init();
+  }
+
   T* data;
   int count;
   int capacity;

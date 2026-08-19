@@ -91,7 +91,7 @@ WrenVM* wrenNewVM(WrenConfiguration* config)
 
   wrenSymbolTableInit(&vm->methodNames);
 
-  vm->modules = wrenNewMap(vm);
+  vm->modules = wrenConstruct<ObjMap>(vm, 0, vm);
   wrenInitializeCore(vm);
   return vm;
 }
@@ -246,7 +246,7 @@ static ObjUpvalue* captureUpvalue(WrenVM* vm, ObjFiber* fiber, Value* local)
   // If there are no open upvalues at all, we must need a new one.
   if (fiber->openUpvalues == nullptr)
   {
-    fiber->openUpvalues = wrenNewUpvalue(vm, local);
+    fiber->openUpvalues = wrenConstruct<ObjUpvalue>(vm, 0, vm, local);
     return fiber->openUpvalues;
   }
 
@@ -267,7 +267,7 @@ static ObjUpvalue* captureUpvalue(WrenVM* vm, ObjFiber* fiber, Value* local)
   // We've walked past this local on the stack, so there must not be an
   // upvalue for it already. Make a new one and link it in in the right
   // place to keep the list sorted.
-  ObjUpvalue* createdUpvalue = wrenNewUpvalue(vm, local);
+  ObjUpvalue* createdUpvalue = wrenConstruct<ObjUpvalue>(vm, 0, vm, local);
   if (prevUpvalue == nullptr)
   {
     // The new one is the first one in the list.
@@ -457,7 +457,7 @@ static ObjClosure* compileInModule(WrenVM* vm, Value name, const char* source,
   ObjModule* module = getModule(vm, name);
   if (module == nullptr)
   {
-    module = wrenNewModule(vm, AS_STRING(name));
+    module = wrenConstruct<ObjModule>(vm, 0, vm, AS_STRING(name));
 
     // It's possible for the wrenMapSet below to resize the modules map,
     // and trigger a GC while doing so. When this happens it will collect
@@ -490,7 +490,8 @@ static ObjClosure* compileInModule(WrenVM* vm, Value name, const char* source,
 
   // Functions are always wrapped in closures.
   wrenPushRoot(vm, (Obj*)fn);
-  ObjClosure* closure = wrenNewClosure(vm, fn);
+  ObjClosure* closure = wrenConstruct<ObjClosure>(
+      vm, sizeof(ObjUpvalue*) * fn->numUpvalues, vm, fn);
   wrenPopRoot(vm); // fn.
 
   return closure;
@@ -1257,9 +1258,13 @@ static WrenInterpretResult runInterpreter(WrenVM* vm, ObjFiber* fiber)
     }
 
     CASE_CODE(CONSTRUCT):
+    {
       ASSERT(IS_CLASS(stackStart[0]), "'this' should be a class.");
-      stackStart[0] = wrenNewInstance(vm, AS_CLASS(stackStart[0]));
+      ObjClass* classObj = AS_CLASS(stackStart[0]);
+      stackStart[0] = OBJ_VAL(wrenConstruct<ObjInstance>(
+          vm, sizeof(Value) * classObj->numFields, vm, classObj));
       DISPATCH();
+    }
 
     CASE_CODE(FOREIGN_CONSTRUCT):
       ASSERT(IS_CLASS(stackStart[0]), "'this' should be a class.");
@@ -1272,7 +1277,8 @@ static WrenInterpretResult runInterpreter(WrenVM* vm, ObjFiber* fiber)
       // Create the closure and push it on the stack before creating upvalues
       // so that it doesn't get collected.
       ObjFn* function = AS_FN(fn->constants.data[READ_SHORT()]);
-      ObjClosure* closure = wrenNewClosure(vm, function);
+      ObjClosure* closure = wrenConstruct<ObjClosure>(
+          vm, sizeof(ObjUpvalue*) * function->numUpvalues, vm, function);
       PUSH(OBJ_VAL(closure));
 
       // Capture upvalues, if any.
@@ -1422,12 +1428,14 @@ WrenHandle* wrenMakeCallHandle(WrenVM* vm, const char* signature)
   
   // Create a little stub function that assumes the arguments are on the stack
   // and calls the method.
-  ObjFn* fn = wrenNewFunction(vm, nullptr, numParams + 1);
+  FnDebug* debug = wrenConstruct<FnDebug>(vm, 0);
+  ObjFn* fn = wrenConstruct<ObjFn>(vm, 0, vm, nullptr, numParams + 1, debug);
   
   // Wrap the function in a closure and then in a handle. Do this here so it
   // doesn't get collected as we fill it in.
   WrenHandle* value = wrenMakeHandle(vm, OBJ_VAL(fn));
-  value->value = OBJ_VAL(wrenNewClosure(vm, fn));
+  value->value = OBJ_VAL(wrenConstruct<ObjClosure>(
+      vm, sizeof(ObjUpvalue*) * fn->numUpvalues, vm, fn));
   
   fn->code.write(vm, (uint8_t)(CODE_CALL_0 + numParams));
   fn->code.write(vm, (method >> 8) & 0xff);
@@ -1518,7 +1526,7 @@ WrenInterpretResult wrenInterpret(WrenVM* vm, const char* module,
   if (closure == nullptr) return WREN_RESULT_COMPILE_ERROR;
   
   wrenPushRoot(vm, (Obj*)closure);
-  ObjFiber* fiber = wrenNewFiber(vm, closure);
+  ObjFiber* fiber = wrenConstruct<ObjFiber>(vm, 0, vm, closure);
   wrenPopRoot(vm); // closure.
   vm->apiStack = nullptr;
 
@@ -1638,7 +1646,7 @@ void wrenEnsureSlots(WrenVM* vm, int numSlots)
   // If we don't have a fiber accessible, create one for the API to use.
   if (vm->apiStack == nullptr)
   {
-    vm->fiber = wrenNewFiber(vm, nullptr);
+    vm->fiber = wrenConstruct<ObjFiber>(vm, 0, vm, nullptr);
     vm->apiStack = vm->fiber->stack;
   }
   
@@ -1755,7 +1763,7 @@ void* wrenSetSlotNewForeign(WrenVM* vm, int slot, int classSlot, size_t size)
   ObjClass* classObj = AS_CLASS(vm->apiStack[classSlot]);
   ASSERT(classObj->numFields == -1, "Class must be a foreign class.");
   
-  ObjForeign* foreign = wrenNewForeign(vm, classObj, size);
+  ObjForeign* foreign = wrenConstruct<ObjForeign>(vm, size, vm, classObj, size);
   vm->apiStack[slot] = OBJ_VAL(foreign);
   
   return (void*)foreign->data;
@@ -1763,12 +1771,12 @@ void* wrenSetSlotNewForeign(WrenVM* vm, int slot, int classSlot, size_t size)
 
 void wrenSetSlotNewList(WrenVM* vm, int slot)
 {
-  setSlot(vm, slot, OBJ_VAL(wrenNewList(vm, 0)));
+  setSlot(vm, slot, OBJ_VAL(wrenConstruct<ObjList>(vm, 0, vm, 0)));
 }
 
 void wrenSetSlotNewMap(WrenVM* vm, int slot)
 {
-  setSlot(vm, slot, OBJ_VAL(wrenNewMap(vm)));
+  setSlot(vm, slot, OBJ_VAL(wrenConstruct<ObjMap>(vm, 0, vm)));
 }
 
 void wrenSetSlotNull(WrenVM* vm, int slot)

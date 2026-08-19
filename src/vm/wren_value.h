@@ -1,7 +1,10 @@
 #ifndef wren_value_h
 #define wren_value_h
 
+#include <new>
+#include <stddef.h>
 #include <string.h>
+#include <utility>
 
 #include "wren_common.h"
 #include "wren_math.h"
@@ -44,6 +47,11 @@
 
 // Forward declarations
 struct ObjClass;
+struct WrenVM;
+
+// Declared in wren_vm.h. Declared here as well so that wrenConstruct(), below,
+// can be defined in this header.
+void* wrenReallocate(WrenVM* vm, void* memory, size_t oldSize, size_t newSize);
 
 // These macros cast a Value to one of the specific object types. These do *not*
 // perform any validation, so must only be used after the Value has been
@@ -107,6 +115,14 @@ typedef enum {
 // Base struct for all heap-allocated objects.
 struct Obj
 {
+  // Initializes the header fields and links the object into the VM's list of
+  // all currently allocated objects, which makes it visible to the garbage
+  // collector.
+  //
+  // Heap objects must be created using wrenConstruct(), below, so that their
+  // memory comes from the VM's allocator instead of the global heap.
+  Obj(WrenVM* vm, ObjType objType, ObjClass* classObj);
+
   ObjType type;
   bool isDark;
 
@@ -116,6 +132,33 @@ struct Obj
   // The next object in the linked list of all currently allocated objects.
   Obj* next;
 };
+
+// Allocates a heap object of type [T] using the VM's allocator, along with
+// [flexBytes] extra bytes for the flexible array member at the end of the
+// object, if it has one. Then constructs the object in that memory, passing
+// the remaining arguments to its constructor.
+//
+// This is how all Wren heap objects are created, and it replaces the old
+// wrenNew___() factory functions. It preserves their exact memory and GC
+// semantics:
+//
+// The memory is allocated and its size tracked before the constructor runs,
+// so a collection triggered by the allocation itself can never observe a
+// half-constructed object. Once the base Obj constructor links the object
+// into the VM's object list, the object must be kept traversable: its fields
+// should be in a state the blacken functions can safely walk, and the
+// constructor must not allocate again unless it first protects the object
+// with wrenPushRoot().
+//
+// The object is never destroyed using `delete` or an explicit destructor
+// call. Instead, wrenFreeObj() releases the object and everything it owns
+// through the VM's allocator once it is no longer reachable.
+template <typename T, typename... Args>
+T* wrenConstruct(WrenVM* vm, size_t flexBytes, Args&&... args)
+{
+  void* memory = wrenReallocate(vm, nullptr, 0, sizeof(T) + flexBytes);
+  return new (memory) T(std::forward<Args>(args)...);
+}
 
 #if WREN_NAN_TAGGING
 
@@ -150,6 +193,12 @@ using ValueBuffer = Buffer<Value>;
 // A heap-allocated string object.
 struct ObjString : public Obj
 {
+  // Creates a string object with a buffer of [length] bytes. The bytes are
+  // left uninitialized (other than the trailing null byte); the caller fills
+  // them in and then calculates the hash. See wrenNewStringLength() and
+  // friends.
+  ObjString(WrenVM* vm, size_t length);
+
   // Number of bytes in the string, not including the null terminator.
   uint32_t length;
 
@@ -175,6 +224,9 @@ struct ObjString : public Obj
 // Note that upvalues are garbage collected, but they are not first class Wren objects.
 struct ObjUpvalue : public Obj
 {
+  // Upvalues are never used as first-class objects, so don't need a class.
+  ObjUpvalue(WrenVM* vm, Value* _value);
+
   // Pointer to the variable this upvalue is referencing.
   Value* value;
 
@@ -202,6 +254,9 @@ typedef bool (*Primitive)(WrenVM* vm, Value* args);
 // traces.
 struct FnDebug
 {
+  // Creates an empty set of debug information.
+  FnDebug();
+
   // The name of the function. Heap allocated and owned by the FnDebug.
   char* name;
 
@@ -217,6 +272,9 @@ struct FnDebug
 // first-class object in Wren.
 struct ObjModule : public Obj
 {
+  // Modules are never used as first-class objects, so don't need a class.
+  ObjModule(WrenVM* vm, ObjString* _name);
+
   // The currently defined top-level variables.
   ValueBuffer variables;
 
@@ -238,6 +296,14 @@ struct ObjModule : public Obj
 // be closures.
 struct ObjFn : public Obj
 {
+  // Creates a new empty function. Before being used, it must have code,
+  // constants, etc. added to it.
+  //
+  // [debug] must have been created before this function: allocating it may
+  // trigger a GC that would otherwise sweep this function before it is
+  // reachable.
+  ObjFn(WrenVM* vm, ObjModule* _module, int _maxSlots, FnDebug* _debug);
+
   ByteBuffer code;
   ValueBuffer constants;
   
@@ -261,6 +327,10 @@ struct ObjFn : public Obj
 // Unlike [ObjFn], this has captured the upvalues that the function accesses.
 struct ObjClosure : public Obj
 {
+  // Creates a new closure object that invokes [fn]. Allocates room for its
+  // upvalues, but assumes outside code will populate it.
+  ObjClosure(WrenVM* vm, ObjFn* _fn);
+
   // The function that this closure is an instance of.
   ObjFn* fn;
 
@@ -303,6 +373,10 @@ enum FiberState
 
 struct ObjFiber : public Obj
 {
+  // Creates a new fiber object that will invoke [closure]. If [closure] is
+  // null, creates an empty fiber for use by the C API.
+  ObjFiber(WrenVM* vm, ObjClosure* _closure);
+
   // The stack of value slots. This is used for holding local variables and
   // temporaries while the fiber is executing. It is heap-allocated and grown
   // as needed.
@@ -377,10 +451,10 @@ using MethodBuffer = Buffer<Method>;
 
 struct ObjClass : public Obj
 {
-  ObjClass(int _numFields, ObjString* _name) 
-  : numFields(_numFields)
-  , name(_name) 
-  {}
+  // Creates a new "raw" class with no metaclass or superclass. This is only
+  // used for bootstrapping the initial Object and Class classes, which are a
+  // little special. See wrenNewSingleClass().
+  ObjClass(WrenVM* vm, int _numFields, ObjString* _name);
 
   ObjClass* superclass = nullptr;
 
@@ -407,16 +481,27 @@ struct ObjClass : public Obj
 
 struct ObjForeign : public Obj
 {
+  // Creates a new foreign object of [size] bytes of zeroed-out data.
+  ObjForeign(WrenVM* vm, ObjClass* _classObj, size_t size);
+
   uint8_t data[FLEXIBLE_ARRAY];
 };
 
 struct ObjInstance : public Obj
 {
+  // Creates a new instance of the given class with all fields initialized
+  // to null.
+  ObjInstance(WrenVM* vm, ObjClass* _classObj);
+
   Value fields[FLEXIBLE_ARRAY];
 };
 
 struct ObjList : public Obj
 {
+  // Creates a new list with [numElements] elements (which are left
+  // uninitialized).
+  ObjList(WrenVM* vm, uint32_t numElements);
+
   // The elements in the list.
   ValueBuffer elements;
 };
@@ -451,6 +536,9 @@ struct MapEntry
 // When the array gets resized, all tombstones are discarded.
 struct ObjMap : public Obj
 {
+  // Creates a new empty map.
+  ObjMap(WrenVM* vm);
+
   // The number of entries allocated.
   uint32_t capacity;
 
@@ -463,6 +551,9 @@ struct ObjMap : public Obj
 
 struct ObjRange : public Obj
 {
+  // Creates a new range from [from] to [to].
+  ObjRange(WrenVM* vm, double _from, double _to, bool _isInclusive);
+
   // The beginning of the range.
   double from;
 
@@ -615,13 +706,6 @@ ObjClass* wrenNewClass(WrenVM* vm, ObjClass* superclass, int numFields,
 
 void wrenBindMethod(WrenVM* vm, ObjClass* classObj, int symbol, Method method);
 
-// Creates a new closure object that invokes [fn]. Allocates room for its
-// upvalues, but assumes outside code will populate it.
-ObjClosure* wrenNewClosure(WrenVM* vm, ObjFn* fn);
-
-// Creates a new fiber object that will invoke [closure].
-ObjFiber* wrenNewFiber(WrenVM* vm, ObjClosure* closure);
-
 // Adds a new [CallFrame] to [fiber] invoking [closure] whose stack starts at
 // [stackStart].
 static inline void wrenAppendCallFrame(WrenVM* vm, ObjFiber* fiber,
@@ -644,20 +728,7 @@ static inline bool wrenHasError(const ObjFiber* fiber)
   return !IS_NULL(fiber->error);
 }
 
-ObjForeign* wrenNewForeign(WrenVM* vm, ObjClass* classObj, size_t size);
-
-// Creates a new empty function. Before being used, it must have code,
-// constants, etc. added to it.
-ObjFn* wrenNewFunction(WrenVM* vm, ObjModule* module, int maxSlots);
-
 void wrenFunctionBindName(WrenVM* vm, ObjFn* fn, const char* name, int length);
-
-// Creates a new instance of the given [classObj].
-Value wrenNewInstance(WrenVM* vm, ObjClass* classObj);
-
-// Creates a new list with [numElements] elements (which are left
-// uninitialized.)
-ObjList* wrenNewList(WrenVM* vm, uint32_t numElements);
 
 // Inserts [value] in [list] at [index], shifting down the other elements.
 void wrenListInsert(WrenVM* vm, ObjList* list, Value value, uint32_t index);
@@ -665,9 +736,6 @@ void wrenListInsert(WrenVM* vm, ObjList* list, Value value, uint32_t index);
 // Removes and returns the item at [index] from [list].
 Value wrenListRemoveAt(WrenVM* vm, ObjList* list, uint32_t index);
 
-
-// Creates a new empty map.
-ObjMap* wrenNewMap(WrenVM* vm);
 
 // Validates that [arg] is a valid object for use as a map key. Returns true if
 // it is and returns false otherwise. Use validateKey usually, for a runtime error.
@@ -686,12 +754,6 @@ void wrenMapClear(WrenVM* vm, ObjMap* map);
 // Removes [key] from [map], if present. Returns the value for the key if found
 // or `NULL_VAL` otherwise.
 Value wrenMapRemoveKey(WrenVM* vm, ObjMap* map, Value key);
-
-// Creates a new module.
-ObjModule* wrenNewModule(WrenVM* vm, ObjString* name);
-
-// Creates a new range from [from] to [to].
-Value wrenNewRange(WrenVM* vm, double from, double to, bool isInclusive);
 
 // Creates a new string object and copies [text] into it.
 //
@@ -746,9 +808,6 @@ static inline bool wrenStringEqualsCString(const ObjString* a,
 {
   return a->length == length && memcmp(a->value, b, length) == 0;
 }
-
-// Creates a new open upvalue pointing to [value] on the stack.
-ObjUpvalue* wrenNewUpvalue(WrenVM* vm, Value* value);
 
 // Mark [obj] as reachable and still in use. This should only be called
 // during the sweep phase of a garbage collection.

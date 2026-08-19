@@ -65,7 +65,7 @@ DEF_PRIMITIVE(fiber_new)
     RETURN_ERROR("Function cannot take more than one parameter.");
   }
   
-  RETURN_OBJ(wrenNewFiber(vm, closure));
+  RETURN_OBJ(wrenConstruct<ObjFiber>(vm, 0, vm, closure));
 }
 
 DEF_PRIMITIVE(fiber_abort)
@@ -304,7 +304,7 @@ DEF_PRIMITIVE(list_filled)
   if (AS_NUM(args[1]) < 0) RETURN_ERROR("Size cannot be negative.");
   
   uint32_t size = (uint32_t)AS_NUM(args[1]);
-  ObjList* list = wrenNewList(vm, size);
+  ObjList* list = wrenConstruct<ObjList>(vm, 0, vm, size);
   
   for (uint32_t i = 0; i < size; i++)
   {
@@ -316,7 +316,7 @@ DEF_PRIMITIVE(list_filled)
 
 DEF_PRIMITIVE(list_new)
 {
-  RETURN_OBJ(wrenNewList(vm, 0));
+  RETURN_OBJ(wrenConstruct<ObjList>(vm, 0, vm, 0));
 }
 
 DEF_PRIMITIVE(list_add)
@@ -437,7 +437,7 @@ DEF_PRIMITIVE(list_subscript)
   uint32_t start = calculateRange(vm, AS_RANGE(args[1]), &count, &step);
   if (start == UINT32_MAX) return false;
 
-  ObjList* result = wrenNewList(vm, count);
+  ObjList* result = wrenConstruct<ObjList>(vm, 0, vm, count);
   for (uint32_t i = 0; i < count; i++)
   {
     result->elements.data[i] = list->elements.data[start + i * step];
@@ -459,7 +459,7 @@ DEF_PRIMITIVE(list_subscriptSetter)
 
 DEF_PRIMITIVE(map_new)
 {
-  RETURN_OBJ(wrenNewMap(vm));
+  RETURN_OBJ(wrenConstruct<ObjMap>(vm, 0, vm));
 }
 
 DEF_PRIMITIVE(map_subscript)
@@ -722,7 +722,7 @@ DEF_PRIMITIVE(num_dotDot)
 
   double from = AS_NUM(args[0]);
   double to = AS_NUM(args[1]);
-  RETURN_VAL(wrenNewRange(vm, from, to, true));
+  RETURN_VAL(OBJ_VAL(wrenConstruct<ObjRange>(vm, 0, vm, from, to, true)));
 }
 
 DEF_PRIMITIVE(num_dotDotDot)
@@ -731,7 +731,7 @@ DEF_PRIMITIVE(num_dotDotDot)
 
   double from = AS_NUM(args[0]);
   double to = AS_NUM(args[1]);
-  RETURN_VAL(wrenNewRange(vm, from, to, false));
+  RETURN_VAL(OBJ_VAL(wrenConstruct<ObjRange>(vm, 0, vm, from, to, false)));
 }
 
 DEF_PRIMITIVE(num_atan2)
@@ -1221,7 +1221,7 @@ static ObjClass* defineClass(WrenVM* vm, ObjModule* module, const char* name)
 
 void wrenInitializeCore(WrenVM* vm)
 {
-  ObjModule* coreModule = wrenNewModule(vm, nullptr);
+  ObjModule* coreModule = wrenConstruct<ObjModule>(vm, 0, vm, nullptr);
   wrenPushRoot(vm, (Obj*)coreModule);
   
   // The core module's key is null in the module map.

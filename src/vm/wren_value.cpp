@@ -31,29 +31,30 @@
 // reallocating when the call stack grows.
 #define INITIAL_CALL_FRAMES 4
 
-static void initObj(WrenVM* vm, Obj* obj, ObjType type, ObjClass* classObj)
+Obj::Obj(WrenVM* vm, ObjType objType, ObjClass* classObj)
 {
-  obj->type = type;
-  obj->isDark = false;
-  obj->classObj = classObj;
-  obj->next = vm->first;
-  vm->first = obj;
+  type = objType;
+  isDark = false;
+  this->classObj = classObj;
+  next = vm->first;
+  vm->first = this;
+}
+
+ObjClass::ObjClass(WrenVM* vm, int _numFields, ObjString* _name)
+  : Obj(vm, OBJ_CLASS, nullptr)
+{
+  superclass = nullptr;
+  numFields = _numFields;
+  name = _name;
+  attributes = NULL_VAL;
+
+  // The methods buffer constructs itself empty, which does not allocate, so
+  // the class is safe from the collector here.
 }
 
 ObjClass* wrenNewSingleClass(WrenVM* vm, int numFields, ObjString* name)
 {
-  ObjClass* classObj = new ObjClass(numFields, name);
-  initObj(vm, classObj, OBJ_CLASS, nullptr);
-  classObj->superclass = nullptr;
-  classObj->numFields = numFields;
-  classObj->name = name;
-  classObj->attributes = NULL_VAL;
-
-  wrenPushRoot(vm, (Obj*)classObj);
-  classObj->methods.init();
-  wrenPopRoot(vm);
-
-  return classObj;
+  return wrenConstruct<ObjClass>(vm, 0, vm, numFields, name);
 }
 
 void wrenBindSuperclass(WrenVM* vm, ObjClass* subclass, ObjClass* superclass)
@@ -127,60 +128,59 @@ void wrenBindMethod(WrenVM* vm, ObjClass* classObj, int symbol, Method method)
   classObj->methods.data[symbol] = method;
 }
 
-ObjClosure* wrenNewClosure(WrenVM* vm, ObjFn* fn)
+ObjClosure::ObjClosure(WrenVM* vm, ObjFn* _fn)
+  : Obj(vm, OBJ_CLOSURE, vm->fnClass)
+  , fn(_fn)
 {
-  ObjClosure* closure = ALLOCATE_FLEX(vm, ObjClosure,
-                                      ObjUpvalue*, fn->numUpvalues);
-  initObj(vm, closure, OBJ_CLOSURE, vm->fnClass);
-
-  closure->fn = fn;
-
   // Clear the upvalue array. We need to do this in case a GC is triggered
   // after the closure is created but before the upvalue array is populated.
-  for (int i = 0; i < fn->numUpvalues; i++) closure->upvalues[i] = nullptr;
-
-  return closure;
+  for (int i = 0; i < fn->numUpvalues; i++) upvalues[i] = nullptr;
 }
 
-ObjFiber* wrenNewFiber(WrenVM* vm, ObjClosure* closure)
+ObjFiber::ObjFiber(WrenVM* vm, ObjClosure* _closure)
+  : Obj(vm, OBJ_FIBER, vm->fiberClass)
 {
-  // Allocate the arrays before the fiber in case it triggers a GC.
-  CallFrame* frames = ALLOCATE_ARRAY(vm, CallFrame, INITIAL_CALL_FRAMES);
-  
+  // The fiber becomes visible to the garbage collector as soon as the base
+  // constructor links it into the VM's object list, and the allocations below
+  // may trigger a collection. Initialize it to an empty state that the
+  // blackening functions can safely traverse.
+  stack = nullptr;
+  stackTop = nullptr;
+  stackCapacity = 0;
+  frames = nullptr;
+  numFrames = 0;
+  frameCapacity = 0;
+  openUpvalues = nullptr;
+  caller = nullptr;
+  error = NULL_VAL;
+  state = FIBER_OTHER;
+
+  // Keep the fiber from being swept while its arrays are allocated.
+  wrenPushRoot(vm, this);
+
+  frames = ALLOCATE_ARRAY(vm, CallFrame, INITIAL_CALL_FRAMES);
+  frameCapacity = INITIAL_CALL_FRAMES;
+
   // Add one slot for the unused implicit receiver slot that the compiler
   // assumes all functions have.
-  int stackCapacity = closure == nullptr
+  int capacity = _closure == nullptr
       ? 1
-      : wrenPowerOf2Ceil(closure->fn->maxSlots + 1);
-  Value* stack = ALLOCATE_ARRAY(vm, Value, stackCapacity);
-  
-  ObjFiber* fiber = ALLOCATE(vm, ObjFiber);
-  initObj(vm, fiber, OBJ_FIBER, vm->fiberClass);
+      : wrenPowerOf2Ceil(_closure->fn->maxSlots + 1);
+  stack = ALLOCATE_ARRAY(vm, Value, capacity);
+  stackCapacity = capacity;
+  stackTop = stack;
 
-  fiber->stack = stack;
-  fiber->stackTop = fiber->stack;
-  fiber->stackCapacity = stackCapacity;
-
-  fiber->frames = frames;
-  fiber->frameCapacity = INITIAL_CALL_FRAMES;
-  fiber->numFrames = 0;
-
-  fiber->openUpvalues = nullptr;
-  fiber->caller = nullptr;
-  fiber->error = NULL_VAL;
-  fiber->state = FIBER_OTHER;
-  
-  if (closure != nullptr)
+  if (_closure != nullptr)
   {
     // Initialize the first call frame.
-    wrenAppendCallFrame(vm, fiber, closure, fiber->stack);
+    wrenAppendCallFrame(vm, this, _closure, stack);
 
     // The first slot always holds the closure.
-    fiber->stackTop[0] = OBJ_VAL(closure);
-    fiber->stackTop++;
+    stackTop[0] = OBJ_VAL(_closure);
+    stackTop++;
   }
-  
-  return fiber;
+
+  wrenPopRoot(vm);
 }
 
 void wrenEnsureStack(WrenVM* vm, ObjFiber* fiber, int needed)
@@ -227,34 +227,28 @@ void wrenEnsureStack(WrenVM* vm, ObjFiber* fiber, int needed)
   }
 }
 
-ObjForeign* wrenNewForeign(WrenVM* vm, ObjClass* classObj, size_t size)
+ObjForeign::ObjForeign(WrenVM* vm, ObjClass* _classObj, size_t size)
+  : Obj(vm, OBJ_FOREIGN, _classObj)
 {
-  ObjForeign* object = ALLOCATE_FLEX(vm, ObjForeign, uint8_t, size);
-  initObj(vm, object, OBJ_FOREIGN, classObj);
-
   // Zero out the bytes.
-  memset(object->data, 0, size);
-  return object;
+  memset(data, 0, size);
 }
 
-ObjFn* wrenNewFunction(WrenVM* vm, ObjModule* module, int maxSlots)
+FnDebug::FnDebug()
 {
-  FnDebug* debug = ALLOCATE(vm, FnDebug);
-  debug->name = nullptr;
-  debug->sourceLines.init();
+  name = nullptr;
+  // The source lines buffer constructs itself empty.
+}
 
-  ObjFn* fn = ALLOCATE(vm, ObjFn);
-  initObj(vm, fn, OBJ_FN, vm->fnClass);
-  
-  fn->constants.init();
-  fn->code.init();
-  fn->module = module;
-  fn->maxSlots = maxSlots;
-  fn->numUpvalues = 0;
-  fn->arity = 0;
-  fn->debug = debug;
-  
-  return fn;
+ObjFn::ObjFn(WrenVM* vm, ObjModule* _module, int _maxSlots, FnDebug* _debug)
+  : Obj(vm, OBJ_FN, vm->fnClass)
+{
+  module = _module;
+  maxSlots = _maxSlots;
+  numUpvalues = 0;
+  arity = 0;
+  debug = _debug;
+  // The code and constants buffers construct themselves empty.
 }
 
 void wrenFunctionBindName(WrenVM* vm, ObjFn* fn, const char* name, int length)
@@ -264,37 +258,36 @@ void wrenFunctionBindName(WrenVM* vm, ObjFn* fn, const char* name, int length)
   fn->debug->name[length] = '\0';
 }
 
-Value wrenNewInstance(WrenVM* vm, ObjClass* classObj)
+ObjInstance::ObjInstance(WrenVM* vm, ObjClass* _classObj)
+  : Obj(vm, OBJ_INSTANCE, _classObj)
 {
-  ObjInstance* instance = ALLOCATE_FLEX(vm, ObjInstance,
-                                        Value, classObj->numFields);
-  initObj(vm, instance, OBJ_INSTANCE, classObj);
-
   // Initialize fields to null.
   for (int i = 0; i < classObj->numFields; i++)
   {
-    instance->fields[i] = NULL_VAL;
+    fields[i] = NULL_VAL;
   }
-
-  return OBJ_VAL(instance);
 }
 
-ObjList* wrenNewList(WrenVM* vm, uint32_t numElements)
+ObjList::ObjList(WrenVM* vm, uint32_t numElements)
+  : Obj(vm, OBJ_LIST, vm->listClass)
 {
-  // Allocate this before the list object in case it triggers a GC which would
-  // free the list.
-  Value* elements = nullptr;
+  // Keep the list from being swept in case the elements allocation triggers
+  // a GC. Its elements buffer is empty until then, so the list can be safely
+  // traversed while that happens.
+  wrenPushRoot(vm, this);
+
+  // Allocate the elements array.
+  Value* data = nullptr;
   if (numElements > 0)
   {
-    elements = ALLOCATE_ARRAY(vm, Value, numElements);
+    data = ALLOCATE_ARRAY(vm, Value, numElements);
   }
 
-  ObjList* list = ALLOCATE(vm, ObjList);
-  initObj(vm, list, OBJ_LIST, vm->listClass);
-  list->elements.capacity = numElements;
-  list->elements.count = numElements;
-  list->elements.data = elements;
-  return list;
+  wrenPopRoot(vm);
+
+  elements.data = data;
+  elements.capacity = numElements;
+  elements.count = numElements;
 }
 
 void wrenListInsert(WrenVM* vm, ObjList* list, Value value, uint32_t index)
@@ -343,14 +336,12 @@ Value wrenListRemoveAt(WrenVM* vm, ObjList* list, uint32_t index)
   return removed;
 }
 
-ObjMap* wrenNewMap(WrenVM* vm)
+ObjMap::ObjMap(WrenVM* vm)
+  : Obj(vm, OBJ_MAP, vm->mapClass)
+  , capacity(0)
+  , count(0)
+  , entries(nullptr)
 {
-  ObjMap* map = ALLOCATE(vm, ObjMap);
-  initObj(vm, map, OBJ_MAP, vm->mapClass);
-  map->capacity = 0;
-  map->count = 0;
-  map->entries = nullptr;
-  return map;
 }
 
 static inline uint32_t hashBits(uint64_t hash)
@@ -625,33 +616,28 @@ Value wrenMapRemoveKey(WrenVM* vm, ObjMap* map, Value key)
   return value;
 }
 
-ObjModule* wrenNewModule(WrenVM* vm, ObjString* name)
+ObjModule::ObjModule(WrenVM* vm, ObjString* _name)
+  : Obj(vm, OBJ_MODULE, nullptr)
 {
-  ObjModule* module = ALLOCATE(vm, ObjModule);
-
-  // Modules are never used as first-class objects, so don't need a class.
-  initObj(vm, (Obj*)module, OBJ_MODULE, nullptr);
-
-  wrenPushRoot(vm, (Obj*)module);
-
-  wrenSymbolTableInit(&module->variableNames);
-  module->variables.init();
-
-  module->name = name;
-
-  wrenPopRoot(vm);
-  return module;
+  name = _name;
+  // The variables and variable names buffers construct themselves empty,
+  // which does not allocate, so the module is safe from the collector here.
 }
 
-Value wrenNewRange(WrenVM* vm, double from, double to, bool isInclusive)
+ObjRange::ObjRange(WrenVM* vm, double _from, double _to, bool _isInclusive)
+  : Obj(vm, OBJ_RANGE, vm->rangeClass)
+  , from(_from)
+  , to(_to)
+  , isInclusive(_isInclusive)
 {
-  ObjRange* range = ALLOCATE(vm, ObjRange);
-  initObj(vm, range, OBJ_RANGE, vm->rangeClass);
-  range->from = from;
-  range->to = to;
-  range->isInclusive = isInclusive;
+}
 
-  return OBJ_VAL(range);
+ObjString::ObjString(WrenVM* vm, size_t _length)
+  : Obj(vm, OBJ_STRING, vm->stringClass)
+{
+  length = (uint32_t)_length;
+  // Inline array of the string's bytes followed by a null terminator.
+  value[_length] = '\0';
 }
 
 // Creates a new string object with a null-terminated buffer large enough to
@@ -661,12 +647,7 @@ Value wrenNewRange(WrenVM* vm, double from, double to, bool isInclusive)
 // hash.
 static ObjString* allocateString(WrenVM* vm, size_t length)
 {
-  ObjString* string = ALLOCATE_FLEX(vm, ObjString, char, length + 1);
-  initObj(vm, string, OBJ_STRING, vm->stringClass);
-  string->length = (int)length;
-  string->value[length] = '\0';
-
-  return string;
+  return wrenConstruct<ObjString>(vm, length + 1, vm, length);
 }
 
 // Calculates and stores the hash code for [string].
@@ -943,17 +924,12 @@ uint32_t wrenStringFind(ObjString* haystack, ObjString* needle, uint32_t start)
   return UINT32_MAX;
 }
 
-ObjUpvalue* wrenNewUpvalue(WrenVM* vm, Value* value)
+ObjUpvalue::ObjUpvalue(WrenVM* vm, Value* _value)
+  : Obj(vm, OBJ_UPVALUE, nullptr)
 {
-  ObjUpvalue* upvalue = ALLOCATE(vm, ObjUpvalue);
-
-  // Upvalues are never used as first-class objects, so don't need a class.
-  initObj(vm, upvalue, OBJ_UPVALUE, nullptr);
-
-  upvalue->value = value;
-  upvalue->closed = NULL_VAL;
-  upvalue->next = nullptr;
-  return upvalue;
+  value = _value;
+  closed = NULL_VAL;
+  next = nullptr;
 }
 
 void wrenGrayObj(WrenVM* vm, Obj* obj)
