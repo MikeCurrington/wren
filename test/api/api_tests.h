@@ -11,7 +11,6 @@
 #include "call.h"
 #include "call_calls_foreign.h"
 #include "call_wren_call_root.h"
-#include "cpp20_bindings.h"
 #include "error.h"
 #include "get_variable.h"
 #include "foreign_class.h"

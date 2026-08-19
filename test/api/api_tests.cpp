@@ -55,9 +55,6 @@ WrenForeignMethodFn APITest_bindForeignMethod(
   method = userDataBindMethod(fullName);
   if (method != NULL) return method;
 
-  method = cpp20BindingsBindMethod(fullName);
-  if (method != NULL) return method;
-
   fprintf(stderr,
       "Unknown foreign method '%s' for test '%s'\n", fullName, testName);
   exit(1);
@@ -77,9 +74,6 @@ WrenForeignClassMethods APITest_bindForeignClass(
   if (methods.allocate != NULL) return methods;
 
   slotsBindClass(className, &methods);
-  if (methods.allocate != NULL) return methods;
-
-  cpp20BindingsBindClass(className, &methods);
   if (methods.allocate != NULL) return methods;
 
   fprintf(stderr,
@@ -110,10 +104,6 @@ int APITest_Run(WrenVM* vm, const char* inTestName)
   else if (strstr(inTestName, "/reset_stack_after_foreign_construct.wren") != NULL)
   {
     return resetStackAfterForeignConstructRunTests(vm);
-  }
-  else if (strstr(inTestName, "/cpp20_bindings.wren") != NULL)
-  {
-    return cpp20BindingsRunTests(vm);
   }
 
   return 0;
