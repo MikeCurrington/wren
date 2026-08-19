@@ -27,7 +27,7 @@ void metaCompile(WrenVM* vm)
   
   // Return the result. We can't use the public API for this since we have a
   // bare ObjClosure*.
-  if (closure == NULL)
+  if (closure == nullptr)
   {
     vm->apiStack[0] = NULL_VAL;
   }
@@ -90,7 +90,7 @@ WrenForeignMethodFn wrenMetaBindForeignMethod(WrenVM* vm,
   }
   
   ASSERT(false, "Unknown method.");
-  return NULL;
+  return nullptr;
 }
 
 #endif

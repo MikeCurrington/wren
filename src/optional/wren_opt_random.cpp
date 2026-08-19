@@ -47,7 +47,7 @@ static void randomSeed0(WrenVM* vm)
 {
   Well512* well = (Well512*)wrenGetSlotForeign(vm, 0);
 
-  srand((uint32_t)time(NULL));
+  srand((uint32_t)time(nullptr));
   for (int i = 0; i < 16; i++)
   {
     well->state[i] = rand();
@@ -114,7 +114,7 @@ WrenForeignClassMethods wrenRandomBindForeignClass(WrenVM* vm,
   ASSERT(strcmp(className, "Random") == 0, "Should be in Random class.");
   WrenForeignClassMethods methods;
   methods.allocate = randomAllocate;
-  methods.finalize = NULL;
+  methods.finalize = nullptr;
   return methods;
 }
 
@@ -138,7 +138,7 @@ WrenForeignMethodFn wrenRandomBindForeignMethod(WrenVM* vm,
   if (strcmp(signature, "int()") == 0) return randomInt0;
   
   ASSERT(false, "Unknown method.");
-  return NULL;
+  return nullptr;
 }
 
 #endif

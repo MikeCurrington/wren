@@ -1,5 +1,4 @@
 #include <errno.h>
-#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -424,7 +423,7 @@ static void printError(Parser* parser, int line, const char* label,
   if (!parser->printErrors) return;
 
   // Only report errors if there is a WrenErrorFn to handle them.
-  if (parser->vm->config.errorFn == NULL) return;
+  if (parser->vm->config.errorFn == nullptr) return;
 
   // Format the label and message.
   char message[ERROR_MESSAGE_SIZE];
@@ -498,7 +497,7 @@ static int addConstant(Compiler* compiler, Value constant)
   if (compiler->parser->hasError) return -1;
   
   // See if we already have a constant for the value. If so, reuse it.
-  if (compiler->constants != NULL)
+  if (compiler->constants != nullptr)
   {
     Value existing = wrenMapGet(compiler->constants, constant);
     if (IS_NUM(existing)) return (int)AS_NUM(existing);
@@ -508,11 +507,10 @@ static int addConstant(Compiler* compiler, Value constant)
   if (compiler->fn->constants.count < MAX_CONSTANTS)
   {
     if (IS_OBJ(constant)) wrenPushRoot(compiler->parser->vm, AS_OBJ(constant));
-    wrenValueBufferWrite(compiler->parser->vm, &compiler->fn->constants,
-                         constant);
+    compiler->fn->constants.write(compiler->parser->vm, constant);
     if (IS_OBJ(constant)) wrenPopRoot(compiler->parser->vm);
     
-    if (compiler->constants == NULL)
+    if (compiler->constants == nullptr)
     {
       compiler->constants = wrenNewMap(compiler->parser->vm);
     }
@@ -534,15 +532,15 @@ static void initCompiler(Compiler* compiler, Parser* parser, Compiler* parent,
 {
   compiler->parser = parser;
   compiler->parent = parent;
-  compiler->loop = NULL;
-  compiler->enclosingClass = NULL;
+  compiler->loop = nullptr;
+  compiler->enclosingClass = nullptr;
   compiler->isInitializer = false;
   
   // Initialize these to NULL before allocating in case a GC gets triggered in
   // the middle of initializing the compiler.
-  compiler->fn = NULL;
-  compiler->constants = NULL;
-  compiler->attributes = NULL;
+  compiler->fn = nullptr;
+  compiler->constants = nullptr;
+  compiler->attributes = nullptr;
 
   parser->vm->compiler = compiler;
 
@@ -563,14 +561,14 @@ static void initCompiler(Compiler* compiler, Parser* parser, Compiler* parent,
   }
   else
   {
-    compiler->locals[0].name = NULL;
+    compiler->locals[0].name = nullptr;
     compiler->locals[0].length = 0;
   }
   
   compiler->locals[0].depth = -1;
   compiler->locals[0].isUpvalue = false;
 
-  if (parent == NULL)
+  if (parent == nullptr)
   {
     // Compiling top-level code, so the initial scope is module-level.
     compiler->scopeDepth = -1;
@@ -620,7 +618,7 @@ static Keyword keywords[] =
   {"true",      4, TOKEN_TRUE},
   {"var",       3, TOKEN_VAR},
   {"while",     5, TOKEN_WHILE},
-  {NULL,        0, TOKEN_EOF} // Sentinel to mark the end of the array.
+  {nullptr,        0, TOKEN_EOF} // Sentinel to mark the end of the array.
 };
 
 // Returns true if [c] is a valid (non-initial) identifier character.
@@ -750,11 +748,11 @@ static void makeNumber(Parser* parser, bool isHex)
 
   if (isHex)
   {
-    parser->next.value = NUM_VAL((double)strtoll(parser->tokenStart, NULL, 16));
+    parser->next.value = NUM_VAL((double)strtoll(parser->tokenStart, nullptr, 16));
   }
   else
   {
-    parser->next.value = NUM_VAL(strtod(parser->tokenStart, NULL));
+    parser->next.value = NUM_VAL(strtod(parser->tokenStart, nullptr));
   }
   
   if (errno == ERANGE)
@@ -818,18 +816,18 @@ static void readNumber(Parser* parser)
 static void readName(Parser* parser, TokenType type, char firstChar)
 {
   ByteBuffer string;
-  wrenByteBufferInit(&string);
-  wrenByteBufferWrite(parser->vm, &string, firstChar);
+  string.init();
+  string.write(parser->vm, firstChar);
 
   while (isName(peekChar(parser)) || isDigit(peekChar(parser)))
   {
     char c = nextChar(parser);
-    wrenByteBufferWrite(parser->vm, &string, c);
+    string.write(parser->vm, c);
   }
 
   // Update the type if it's a keyword.
   size_t length = parser->currentChar - parser->tokenStart;
-  for (int i = 0; keywords[i].identifier != NULL; i++)
+  for (int i = 0; keywords[i].identifier != nullptr; i++)
   {
     if (length == keywords[i].length &&
         memcmp(parser->tokenStart, keywords[i].identifier, length) == 0)
@@ -842,7 +840,7 @@ static void readName(Parser* parser, TokenType type, char firstChar)
   parser->next.value = wrenNewStringLength(parser->vm,
                                             (char*)string.data, string.count);
 
-  wrenByteBufferClear(parser->vm, &string);
+  string.clear(parser->vm);
   makeToken(parser, type);
 }
 
@@ -884,7 +882,7 @@ static void readUnicodeEscape(Parser* parser, ByteBuffer* string, int length)
   int numBytes = wrenUtf8EncodeNumBytes(value);
   if (numBytes != 0)
   {
-    wrenByteBufferFill(parser->vm, string, 0, numBytes);
+    string->fill(parser->vm, 0, numBytes);
     wrenUtf8Encode(value, string->data + string->count - numBytes);
   }
 }
@@ -892,7 +890,7 @@ static void readUnicodeEscape(Parser* parser, ByteBuffer* string, int length)
 static void readRawString(Parser* parser)
 {
   ByteBuffer string;
-  wrenByteBufferInit(&string);
+  string.init();
   TokenType type = TOKEN_STRING;
 
   //consume the second and third "
@@ -944,7 +942,7 @@ static void readRawString(Parser* parser)
       break;
     }
  
-    wrenByteBufferWrite(parser->vm, &string, c);
+    string.write(parser->vm, c);
   }
 
   //consume the second and third "
@@ -962,7 +960,7 @@ static void readRawString(Parser* parser)
   parser->next.value = wrenNewStringLength(parser->vm, 
                          ((char*)string.data) + offset, count);
   
-  wrenByteBufferClear(parser->vm, &string);
+  string.clear(parser->vm);
   makeToken(parser, type);
 }
 
@@ -971,7 +969,7 @@ static void readString(Parser* parser)
 {
   ByteBuffer string;
   TokenType type = TOKEN_STRING;
-  wrenByteBufferInit(&string);
+  string.init();
   
   for (;;)
   {
@@ -1009,23 +1007,22 @@ static void readString(Parser* parser)
     {
       switch (nextChar(parser))
       {
-        case '"':  wrenByteBufferWrite(parser->vm, &string, '"'); break;
-        case '\\': wrenByteBufferWrite(parser->vm, &string, '\\'); break;
-        case '%':  wrenByteBufferWrite(parser->vm, &string, '%'); break;
-        case '0':  wrenByteBufferWrite(parser->vm, &string, '\0'); break;
-        case 'a':  wrenByteBufferWrite(parser->vm, &string, '\a'); break;
-        case 'b':  wrenByteBufferWrite(parser->vm, &string, '\b'); break;
-        case 'e':  wrenByteBufferWrite(parser->vm, &string, '\33'); break;
-        case 'f':  wrenByteBufferWrite(parser->vm, &string, '\f'); break;
-        case 'n':  wrenByteBufferWrite(parser->vm, &string, '\n'); break;
-        case 'r':  wrenByteBufferWrite(parser->vm, &string, '\r'); break;
-        case 't':  wrenByteBufferWrite(parser->vm, &string, '\t'); break;
+        case '"':  string.write(parser->vm, '"'); break;
+        case '\\': string.write(parser->vm, '\\'); break;
+        case '%':  string.write(parser->vm, '%'); break;
+        case '0':  string.write(parser->vm, '\0'); break;
+        case 'a':  string.write(parser->vm, '\a'); break;
+        case 'b':  string.write(parser->vm, '\b'); break;
+        case 'e':  string.write(parser->vm, '\33'); break;
+        case 'f':  string.write(parser->vm, '\f'); break;
+        case 'n':  string.write(parser->vm, '\n'); break;
+        case 'r':  string.write(parser->vm, '\r'); break;
+        case 't':  string.write(parser->vm, '\t'); break;
         case 'u':  readUnicodeEscape(parser, &string, 4); break;
         case 'U':  readUnicodeEscape(parser, &string, 8); break;
-        case 'v':  wrenByteBufferWrite(parser->vm, &string, '\v'); break;
+        case 'v':  string.write(parser->vm, '\v'); break;
         case 'x':
-          wrenByteBufferWrite(parser->vm, &string,
-                              (uint8_t)readHexEscape(parser, 2, "byte"));
+          string.write(parser->vm, (uint8_t)readHexEscape(parser, 2, "byte"));
           break;
 
         default:
@@ -1036,14 +1033,14 @@ static void readString(Parser* parser)
     }
     else
     {
-      wrenByteBufferWrite(parser->vm, &string, c);
+      string.write(parser->vm, c);
     }
   }
 
   parser->next.value = wrenNewStringLength(parser->vm,
                                               (char*)string.data, string.count);
   
-  wrenByteBufferClear(parser->vm, &string);
+  string.clear(parser->vm);
   makeToken(parser, type);
 }
 
@@ -1311,11 +1308,10 @@ static void allowLineBeforeDot(Compiler* compiler) {
 // Emits one single-byte argument. Returns its index.
 static int emitByte(Compiler* compiler, int byte)
 {
-  wrenByteBufferWrite(compiler->parser->vm, &compiler->fn->code, (uint8_t)byte);
+  compiler->fn->code.write(compiler->parser->vm, (uint8_t)byte);
   
   // Assume the instruction is associated with the most recently consumed token.
-  wrenIntBufferWrite(compiler->parser->vm, &compiler->fn->debug->sourceLines,
-                     compiler->parser->previous.line);
+  compiler->fn->debug->sourceLines.write(compiler->parser->vm, compiler->parser->previous.line);
   
   return compiler->fn->code.count - 1;
 }
@@ -1393,7 +1389,7 @@ static int addLocal(Compiler* compiler, const char* name, int length)
 // If [token] is `NULL`, uses the previously consumed token. Returns its symbol.
 static int declareVariable(Compiler* compiler, Token* token)
 {
-  if (token == NULL) token = &compiler->parser->previous;
+  if (token == nullptr) token = &compiler->parser->previous;
 
   if (token->length > MAX_VARIABLE_NAME)
   {
@@ -1460,7 +1456,7 @@ static int declareVariable(Compiler* compiler, Token* token)
 static int declareNamedVariable(Compiler* compiler)
 {
   consume(compiler, TOKEN_NAME, "Expect variable name.");
-  return declareVariable(compiler, NULL);
+  return declareVariable(compiler, nullptr);
 }
 
 // Stores a variable with the previously defined symbol in the current scope.
@@ -1577,11 +1573,11 @@ static int addUpvalue(Compiler* compiler, bool isLocal, int index)
 static int findUpvalue(Compiler* compiler, const char* name, int length)
 {
   // If we are at the top level, we didn't find it.
-  if (compiler->parent == NULL) return -1;
+  if (compiler->parent == nullptr) return -1;
   
   // If we hit the method boundary (and the name isn't a static field), then
   // stop looking for it. We'll instead treat it as a self send.
-  if (name[0] != '_' && compiler->parent->enclosingClass != NULL) return -1;
+  if (name[0] != '_' && compiler->parent->enclosingClass != nullptr) return -1;
   
   // See if it's a local variable in the immediately enclosing function.
   int local = resolveLocal(compiler->parent, name, length);
@@ -1665,7 +1661,7 @@ static ObjFn* endCompiler(Compiler* compiler,
   if (compiler->parser->hasError)
   {
     compiler->parser->vm->compiler = compiler->parent;
-    return NULL;
+    return nullptr;
   }
 
   // Mark the end of the bytecode. Since it may contain multiple early returns,
@@ -1676,7 +1672,7 @@ static ObjFn* endCompiler(Compiler* compiler,
                        debugName, debugNameLength);
   
   // In the function that contains this one, load the resulting function object.
-  if (compiler->parent != NULL)
+  if (compiler->parent != nullptr)
   {
     int constant = addConstant(compiler->parent, OBJ_VAL(compiler->fn));
 
@@ -2228,13 +2224,13 @@ static void boolean(Compiler* compiler, bool canAssign)
 // enclosing this one. Returns NULL if not currently inside a class definition.
 static Compiler* getEnclosingClassCompiler(Compiler* compiler)
 {
-  while (compiler != NULL)
+  while (compiler != nullptr)
   {
-    if (compiler->enclosingClass != NULL) return compiler;
+    if (compiler->enclosingClass != nullptr) return compiler;
     compiler = compiler->parent;
   }
 
-  return NULL;
+  return nullptr;
 }
 
 // Walks the compiler chain to find the nearest class enclosing this one.
@@ -2242,7 +2238,7 @@ static Compiler* getEnclosingClassCompiler(Compiler* compiler)
 static ClassInfo* getEnclosingClass(Compiler* compiler)
 {
   compiler = getEnclosingClassCompiler(compiler);
-  return compiler == NULL ? NULL : compiler->enclosingClass;
+  return compiler == nullptr ? nullptr : compiler->enclosingClass;
 }
 
 static void field(Compiler* compiler, bool canAssign)
@@ -2253,7 +2249,7 @@ static void field(Compiler* compiler, bool canAssign)
 
   ClassInfo* enclosingClass = getEnclosingClass(compiler);
 
-  if (enclosingClass == NULL)
+  if (enclosingClass == nullptr)
   {
     error(compiler, "Cannot reference a field outside of a class definition.");
   }
@@ -2288,7 +2284,7 @@ static void field(Compiler* compiler, bool canAssign)
   }
 
   // If we're directly inside a method, use a more optimal instruction.
-  if (compiler->parent != NULL &&
+  if (compiler->parent != nullptr &&
       compiler->parent->enclosingClass == enclosingClass)
   {
     emitByteArg(compiler, isLoad ? CODE_LOAD_FIELD_THIS : CODE_STORE_FIELD_THIS,
@@ -2339,7 +2335,7 @@ static void bareName(Compiler* compiler, bool canAssign, Variable variable)
 static void staticField(Compiler* compiler, bool canAssign)
 {
   Compiler* classCompiler = getEnclosingClassCompiler(compiler);
-  if (classCompiler == NULL)
+  if (classCompiler == nullptr)
   {
     error(compiler, "Cannot use a static field outside of a class definition.");
     return;
@@ -2352,7 +2348,7 @@ static void staticField(Compiler* compiler, bool canAssign)
   // define it as a variable in the scope surrounding the class definition.
   if (resolveLocal(classCompiler, token->start, token->length) == -1)
   {
-    int symbol = declareVariable(classCompiler, NULL);
+    int symbol = declareVariable(classCompiler, nullptr);
 
     // Implicitly initialize it to null.
     emitOp(classCompiler, CODE_NULL);
@@ -2389,7 +2385,7 @@ static void name(Compiler* compiler, bool canAssign)
 
   // If we're inside a method and the name is lowercase, treat it as a method
   // on this.
-  if (wrenIsLocalName(token->start) && getEnclosingClass(compiler) != NULL)
+  if (wrenIsLocalName(token->start) && getEnclosingClass(compiler) != nullptr)
   {
     loadThis(compiler);
     namedCall(compiler, canAssign, CODE_CALL_0);
@@ -2471,7 +2467,7 @@ static void stringInterpolation(Compiler* compiler, bool canAssign)
 static void super_(Compiler* compiler, bool canAssign)
 {
   ClassInfo* enclosingClass = getEnclosingClass(compiler);
-  if (enclosingClass == NULL)
+  if (enclosingClass == nullptr)
   {
     error(compiler, "Cannot use 'super' outside of a method.");
   }
@@ -2489,7 +2485,7 @@ static void super_(Compiler* compiler, bool canAssign)
     consume(compiler, TOKEN_NAME, "Expect method name after 'super.'.");
     namedCall(compiler, canAssign, CODE_SUPER_0);
   }
-  else if (enclosingClass != NULL)
+  else if (enclosingClass != nullptr)
   {
     // No explicit name, so use the name of the enclosing method. Make sure we
     // check that enclosingClass isn't NULL first. We've already reported the
@@ -2500,7 +2496,7 @@ static void super_(Compiler* compiler, bool canAssign)
 
 static void this_(Compiler* compiler, bool canAssign)
 {
-  if (getEnclosingClass(compiler) == NULL)
+  if (getEnclosingClass(compiler) == nullptr)
   {
     error(compiler, "Cannot use 'this' outside of a method.");
     return;
@@ -2745,18 +2741,18 @@ void constructorSignature(Compiler* compiler, Signature* signature)
 // expressions in the grammar. Expressions are parsed using a Pratt parser.
 //
 // See: http://journal.stuffwithstuff.com/2011/03/19/pratt-parsers-expression-parsing-made-easy/
-#define UNUSED                     { NULL, NULL, NULL, PREC_NONE, NULL }
-#define PREFIX(fn)                 { fn, NULL, NULL, PREC_NONE, NULL }
-#define INFIX(prec, fn)            { NULL, fn, NULL, prec, NULL }
-#define INFIX_OPERATOR(prec, name) { NULL, infixOp, infixSignature, prec, name }
-#define PREFIX_OPERATOR(name)      { unaryOp, NULL, unarySignature, PREC_NONE, name }
+#define UNUSED                     { nullptr, nullptr, nullptr, PREC_NONE, nullptr }
+#define PREFIX(fn)                 { fn, nullptr, nullptr, PREC_NONE, nullptr }
+#define INFIX(prec, fn)            { nullptr, fn, nullptr, prec, nullptr }
+#define INFIX_OPERATOR(prec, name) { nullptr, infixOp, infixSignature, prec, name }
+#define PREFIX_OPERATOR(name)      { unaryOp, nullptr, unarySignature, PREC_NONE, name }
 #define OPERATOR(name)             { unaryOp, infixOp, mixedSignature, PREC_TERM, name }
 
 GrammarRule rules[] =
 {
   /* TOKEN_LEFT_PAREN    */ PREFIX(grouping),
   /* TOKEN_RIGHT_PAREN   */ UNUSED,
-  /* TOKEN_LEFT_BRACKET  */ { list, subscript, subscriptSignature, PREC_CALL, NULL },
+  /* TOKEN_LEFT_BRACKET  */ { list, subscript, subscriptSignature, PREC_CALL, nullptr },
   /* TOKEN_RIGHT_BRACKET */ UNUSED,
   /* TOKEN_LEFT_BRACE    */ PREFIX(map),
   /* TOKEN_RIGHT_BRACE   */ UNUSED,
@@ -2791,7 +2787,7 @@ GrammarRule rules[] =
   /* TOKEN_BREAK         */ UNUSED,
   /* TOKEN_CONTINUE      */ UNUSED,
   /* TOKEN_CLASS         */ UNUSED,
-  /* TOKEN_CONSTRUCT     */ { NULL, NULL, constructorSignature, PREC_NONE, NULL },
+  /* TOKEN_CONSTRUCT     */ { nullptr, nullptr, constructorSignature, PREC_NONE, nullptr },
   /* TOKEN_ELSE          */ UNUSED,
   /* TOKEN_FALSE         */ PREFIX(boolean),
   /* TOKEN_FOR           */ UNUSED,
@@ -2811,7 +2807,7 @@ GrammarRule rules[] =
   /* TOKEN_WHILE         */ UNUSED,
   /* TOKEN_FIELD         */ PREFIX(field),
   /* TOKEN_STATIC_FIELD  */ PREFIX(staticField),
-  /* TOKEN_NAME          */ { name, NULL, namedSignature, PREC_NONE, NULL },
+  /* TOKEN_NAME          */ { name, nullptr, namedSignature, PREC_NONE, nullptr },
   /* TOKEN_NUMBER        */ PREFIX(literal),
   /* TOKEN_STRING        */ PREFIX(literal),
   /* TOKEN_INTERPOLATION */ PREFIX(stringInterpolation),
@@ -2832,7 +2828,7 @@ void parsePrecedence(Compiler* compiler, Precedence precedence)
   nextToken(compiler->parser);
   GrammarFn prefix = rules[compiler->parser->previous.type].prefix;
 
-  if (prefix == NULL)
+  if (prefix == nullptr)
   {
     error(compiler, "Expected expression.");
     return;
@@ -3182,7 +3178,7 @@ void statement(Compiler* compiler)
 {
   if (match(compiler, TOKEN_BREAK))
   {
-    if (compiler->loop == NULL)
+    if (compiler->loop == nullptr)
     {
       error(compiler, "Cannot use 'break' outside of a loop.");
       return;
@@ -3201,7 +3197,7 @@ void statement(Compiler* compiler)
   }
   else if (match(compiler, TOKEN_CONTINUE))
   {
-    if (compiler->loop == NULL)
+    if (compiler->loop == nullptr)
     {
         error(compiler, "Cannot use 'continue' outside of a loop.");
         return;
@@ -3343,7 +3339,7 @@ static int declareMethod(Compiler* compiler, Signature* signature,
     }
   }
   
-  wrenIntBufferWrite(compiler->parser->vm, methods, symbol);
+  methods->write(compiler->parser->vm, symbol);
   return symbol;
 }
 
@@ -3445,7 +3441,7 @@ static bool method(Compiler* compiler, Variable classVariable)
   SignatureFn signatureFn = rules[compiler->parser->current.type].method;
   nextToken(compiler->parser);
   
-  if (signatureFn == NULL)
+  if (signatureFn == nullptr)
   {
     error(compiler, "Expect method definition.");
     return false;
@@ -3573,8 +3569,8 @@ static void classDefinition(Compiler* compiler, bool isForeign)
   // A method will allocate the methods one if needed
   classInfo.classAttributes = compiler->attributes->count > 0 
         ? wrenNewMap(compiler->parser->vm) 
-        : NULL;
-  classInfo.methodAttributes = NULL;
+        : nullptr;
+  classInfo.methodAttributes = nullptr;
   // Copy any existing attributes into the class
   copyAttributes(compiler, classInfo.classAttributes);
 
@@ -3585,8 +3581,8 @@ static void classDefinition(Compiler* compiler, bool isForeign)
   wrenSymbolTableInit(&classInfo.fields);
   
   // Set up symbol buffers to track duplicate static and instance methods.
-  wrenIntBufferInit(&classInfo.methods);
-  wrenIntBufferInit(&classInfo.staticMethods);
+  classInfo.methods.init();
+  classInfo.staticMethods.init();
   compiler->enclosingClass = &classInfo;
 
   // Compile the method definitions.
@@ -3606,8 +3602,8 @@ static void classDefinition(Compiler* compiler, bool isForeign)
   // If any attributes are present, 
   // instantiate a ClassAttributes instance for the class
   // and send it over to CODE_END_CLASS
-  bool hasAttr = classInfo.classAttributes != NULL || 
-                 classInfo.methodAttributes != NULL;
+  bool hasAttr = classInfo.classAttributes != nullptr || 
+                 classInfo.methodAttributes != nullptr;
   if(hasAttr) {
     emitClassAttributes(compiler, &classInfo);
     loadVariable(compiler, classVariable);
@@ -3626,9 +3622,9 @@ static void classDefinition(Compiler* compiler, bool isForeign)
   
   // Clear symbol tables for tracking field and method names.
   wrenSymbolTableClear(compiler->parser->vm, &classInfo.fields);
-  wrenIntBufferClear(compiler->parser->vm, &classInfo.methods);
-  wrenIntBufferClear(compiler->parser->vm, &classInfo.staticMethods);
-  compiler->enclosingClass = NULL;
+  classInfo.methods.clear(compiler->parser->vm);
+  classInfo.staticMethods.clear(compiler->parser->vm);
+  compiler->enclosingClass = nullptr;
   popScope(compiler);
 }
 
@@ -3800,7 +3796,7 @@ ObjFn* wrenCompile(WrenVM* vm, ObjModule* module, const char* source,
   int numExistingVariables = module->variables.count;
 
   Compiler compiler;
-  initCompiler(&compiler, &parser, NULL, false);
+  initCompiler(&compiler, &parser, nullptr, false);
   ignoreNewlines(&compiler);
 
   if (isExpression)
@@ -3921,15 +3917,15 @@ void wrenMarkCompiler(WrenVM* vm, Compiler* compiler)
     wrenGrayObj(vm, (Obj*)compiler->constants);
     wrenGrayObj(vm, (Obj*)compiler->attributes);
     
-    if (compiler->enclosingClass != NULL)
+    if (compiler->enclosingClass != nullptr)
     {
       wrenBlackenSymbolTable(vm, &compiler->enclosingClass->fields);
 
-      if(compiler->enclosingClass->methodAttributes != NULL) 
+      if(compiler->enclosingClass->methodAttributes != nullptr) 
       {
         wrenGrayObj(vm, (Obj*)compiler->enclosingClass->methodAttributes);
       }
-      if(compiler->enclosingClass->classAttributes != NULL) 
+      if(compiler->enclosingClass->classAttributes != nullptr) 
       {
         wrenGrayObj(vm, (Obj*)compiler->enclosingClass->classAttributes);
       }
@@ -3937,7 +3933,7 @@ void wrenMarkCompiler(WrenVM* vm, Compiler* compiler)
     
     compiler = compiler->parent;
   }
-  while (compiler != NULL);
+  while (compiler != nullptr);
 }
 
 // Helpers for Attributes
@@ -3986,7 +3982,7 @@ static void addToAttributeGroup(Compiler* compiler,
 
   //keyItems.add(value)
   ObjList* keyItems = AS_LIST(keyItemsValue);
-  wrenValueBufferWrite(vm, &keyItems->elements, value);
+  keyItems->elements.write(vm, value);
 
   if(IS_OBJ(group)) wrenPopRoot(vm);
   if(IS_OBJ(key))   wrenPopRoot(vm);
@@ -4084,7 +4080,7 @@ static void copyAttributes(Compiler* compiler, ObjMap* into)
   compiler->numAttributes = 0;
 
   if(compiler->attributes->count == 0) return;
-  if(into == NULL) return;
+  if(into == nullptr) return;
 
   WrenVM* vm = compiler->parser->vm;
   
@@ -4128,7 +4124,7 @@ static void copyMethodAttributes(Compiler* compiler, bool isForeign,
                                                length, fullSignature);
   fullSignatureWithPrefix[fullLength] = '\0';
 
-  if(compiler->enclosingClass->methodAttributes == NULL) {
+  if(compiler->enclosingClass->methodAttributes == nullptr) {
     compiler->enclosingClass->methodAttributes = wrenNewMap(vm);
   }
   

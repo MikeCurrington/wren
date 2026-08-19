@@ -233,7 +233,7 @@ static inline ObjClass* wrenGetClassInline(WrenVM* vm, Value value)
 #endif
 
   UNREACHABLE();
-  return NULL;
+  return nullptr;
 }
 
 // Returns `true` if [name] is a local variable name (starts with a lowercase

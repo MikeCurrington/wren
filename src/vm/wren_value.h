@@ -1,7 +1,6 @@
 #ifndef wren_value_h
 #define wren_value_h
 
-#include <stdbool.h>
 #include <string.h>
 
 #include "wren_common.h"
@@ -146,7 +145,7 @@ typedef struct
 
 #endif
 
-DECLARE_BUFFER(Value, Value);
+using ValueBuffer = Buffer<Value>;
 
 // A heap-allocated string object.
 struct sObjString
@@ -387,7 +386,7 @@ typedef struct
   } as;
 } Method;
 
-DECLARE_BUFFER(Method, Method);
+using MethodBuffer = Buffer<Method>;
 
 struct sObjClass
 {

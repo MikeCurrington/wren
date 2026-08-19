@@ -40,7 +40,7 @@ DEF_PRIMITIVE(class_supertype)
   ObjClass* classObj = AS_CLASS(args[0]);
 
   // Object has no superclass.
-  if (classObj->superclass == NULL) RETURN_NULL;
+  if (classObj->superclass == nullptr) RETURN_NULL;
 
   RETURN_OBJ(classObj->superclass);
 }
@@ -98,7 +98,7 @@ static bool runFiber(WrenVM* vm, ObjFiber* fiber, Value* args, bool isCall,
     // which is why this check is gated on `isCall`. This way, after resuming a
     // suspended fiber, it will run and then return to the fiber that called it
     // and so on.
-    if (fiber->caller != NULL) RETURN_ERROR("Fiber has already been called.");
+    if (fiber->caller != nullptr) RETURN_ERROR("Fiber has already been called.");
 
     if (fiber->state == FIBER_ROOT) RETURN_ERROR("Cannot call root fiber.");
     
@@ -166,8 +166,8 @@ DEF_PRIMITIVE(fiber_isDone)
 DEF_PRIMITIVE(fiber_suspend)
 {
   // Switching to a null fiber tells the interpreter to stop and exit.
-  vm->fiber = NULL;
-  vm->apiStack = NULL;
+  vm->fiber = nullptr;
+  vm->apiStack = nullptr;
   return false;
 }
 
@@ -212,10 +212,10 @@ DEF_PRIMITIVE(fiber_yield)
   vm->fiber = current->caller;
 
   // Unhook this fiber from the one that called it.
-  current->caller = NULL;
+  current->caller = nullptr;
   current->state = FIBER_OTHER;
 
-  if (vm->fiber != NULL)
+  if (vm->fiber != nullptr)
   {
     // Make the caller's run method return null.
     vm->fiber->stackTop[-1] = NULL_VAL;
@@ -230,10 +230,10 @@ DEF_PRIMITIVE(fiber_yield1)
   vm->fiber = current->caller;
 
   // Unhook this fiber from the one that called it.
-  current->caller = NULL;
+  current->caller = nullptr;
   current->state = FIBER_OTHER;
 
-  if (vm->fiber != NULL)
+  if (vm->fiber != nullptr)
   {
     // Make the caller's run method return the argument passed to yield.
     vm->fiber->stackTop[-1] = args[1];
@@ -321,7 +321,7 @@ DEF_PRIMITIVE(list_new)
 
 DEF_PRIMITIVE(list_add)
 {
-  wrenValueBufferWrite(vm, &AS_LIST(args[0])->elements, args[1]);
+  AS_LIST(args[0])->elements.write(vm, args[1]);
   RETURN_VAL(args[1]);
 }
 
@@ -330,7 +330,7 @@ DEF_PRIMITIVE(list_add)
 // minimize stack churn.
 DEF_PRIMITIVE(list_addCore)
 {
-  wrenValueBufferWrite(vm, &AS_LIST(args[0])->elements, args[1]);
+  AS_LIST(args[0])->elements.write(vm, args[1]);
   
   // Return the list.
   RETURN_VAL(args[0]);
@@ -338,7 +338,7 @@ DEF_PRIMITIVE(list_addCore)
 
 DEF_PRIMITIVE(list_clear)
 {
-  wrenValueBufferClear(vm, &AS_LIST(args[0])->elements);
+  AS_LIST(args[0])->elements.clear(vm);
   RETURN_NULL;
 }
 
@@ -867,7 +867,7 @@ DEF_PRIMITIVE(object_is)
 
     classObj = classObj->superclass;
   }
-  while (classObj != NULL);
+  while (classObj != nullptr);
 
   RETURN_BOOL(false);
 }
@@ -1197,7 +1197,7 @@ DEF_PRIMITIVE(system_gc)
 
 DEF_PRIMITIVE(system_writeString)
 {
-  if (vm->config.writeFn != NULL)
+  if (vm->config.writeFn != nullptr)
   {
     vm->config.writeFn(vm, AS_CSTRING(args[1]));
   }
@@ -1213,7 +1213,7 @@ static ObjClass* defineClass(WrenVM* vm, ObjModule* module, const char* name)
 
   ObjClass* classObj = wrenNewSingleClass(vm, 0, nameString);
 
-  wrenDefineVariable(vm, module, name, nameString->length, OBJ_VAL(classObj), NULL);
+  wrenDefineVariable(vm, module, name, nameString->length, OBJ_VAL(classObj), nullptr);
 
   wrenPopRoot(vm);
   return classObj;
@@ -1221,7 +1221,7 @@ static ObjClass* defineClass(WrenVM* vm, ObjModule* module, const char* name)
 
 void wrenInitializeCore(WrenVM* vm)
 {
-  ObjModule* coreModule = wrenNewModule(vm, NULL);
+  ObjModule* coreModule = wrenNewModule(vm, nullptr);
   wrenPushRoot(vm, (Obj*)coreModule);
   
   // The core module's key is null in the module map.
@@ -1283,7 +1283,7 @@ void wrenInitializeCore(WrenVM* vm)
   //   '---------'   '-------------------'            -'
 
   // The rest of the classes can now be defined normally.
-  wrenInterpret(vm, NULL, coreModuleSource);
+  wrenInterpret(vm, nullptr, coreModuleSource);
 
   vm->boolClass = AS_CLASS(wrenFindVariable(vm, coreModule, "Bool"));
   PRIMITIVE(vm->boolClass, "toString", bool_toString);
@@ -1465,7 +1465,7 @@ void wrenInitializeCore(WrenVM* vm)
   //
   // These all currently have a NULL classObj pointer, so go back and assign
   // them now that the string class is known.
-  for (Obj* obj = vm->first; obj != NULL; obj = obj->next)
+  for (Obj* obj = vm->first; obj != nullptr; obj = obj->next)
   {
     if (obj->type == OBJ_STRING) obj->classObj = vm->stringClass;
   }

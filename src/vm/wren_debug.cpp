@@ -5,20 +5,20 @@
 void wrenDebugPrintStackTrace(WrenVM* vm)
 {
   // Bail if the host doesn't enable printing errors.
-  if (vm->config.errorFn == NULL) return;
+  if (vm->config.errorFn == nullptr) return;
   
   ObjFiber* fiber = vm->fiber;
   if (IS_STRING(fiber->error))
   {
     vm->config.errorFn(vm, WREN_ERROR_RUNTIME,
-                       NULL, -1, AS_CSTRING(fiber->error));
+                       nullptr, -1, AS_CSTRING(fiber->error));
   }
   else
   {
     // TODO: Print something a little useful here. Maybe the name of the error's
     // class?
     vm->config.errorFn(vm, WREN_ERROR_RUNTIME,
-                       NULL, -1, "[error object]");
+                       nullptr, -1, "[error object]");
   }
 
   for (int i = fiber->numFrames - 1; i >= 0; i--)
@@ -27,12 +27,12 @@ void wrenDebugPrintStackTrace(WrenVM* vm)
     ObjFn* fn = frame->closure->fn;
 
     // Skip over stub functions for calling methods from the C API.
-    if (fn->module == NULL) continue;
+    if (fn->module == nullptr) continue;
     
     // The built-in core module has no name. We explicitly omit it from stack
     // traces since we don't want to highlight to a user the implementation
     // detail of what part of the core module is written in C and what is Wren.
-    if (fn->module->name == NULL) continue;
+    if (fn->module->name == nullptr) continue;
     
     // -1 because IP has advanced past the instruction that it just executed.
     int line = fn->debug->sourceLines.data[frame->ip - fn->code.data - 1];
@@ -106,10 +106,10 @@ static int dumpInstruction(WrenVM* vm, ObjFn* fn, int i, int* lastLine)
   Code code = (Code)bytecode[i];
 
   int line = fn->debug->sourceLines.data[i];
-  if (lastLine == NULL || *lastLine != line)
+  if (lastLine == nullptr || *lastLine != line)
   {
     printf("%4d:", line);
-    if (lastLine != NULL) *lastLine = line;
+    if (lastLine != nullptr) *lastLine = line;
   }
   else
   {
@@ -355,13 +355,13 @@ static int dumpInstruction(WrenVM* vm, ObjFn* fn, int i, int* lastLine)
 
 int wrenDumpInstruction(WrenVM* vm, ObjFn* fn, int i)
 {
-  return dumpInstruction(vm, fn, i, NULL);
+  return dumpInstruction(vm, fn, i, nullptr);
 }
 
 void wrenDumpCode(WrenVM* vm, ObjFn* fn)
 {
   printf("%s: %s\n",
-         fn->module->name == NULL ? "<core>" : fn->module->name->value,
+         fn->module->name == nullptr ? "<core>" : fn->module->name->value,
          fn->debug->name);
 
   int i = 0;

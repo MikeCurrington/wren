@@ -3,18 +3,14 @@
 #include "wren_utils.h"
 #include "wren_vm.h"
 
-DEFINE_BUFFER(Byte, uint8_t);
-DEFINE_BUFFER(Int, int);
-DEFINE_BUFFER(String, ObjString*);
-
 void wrenSymbolTableInit(SymbolTable* symbols)
 {
-  wrenStringBufferInit(symbols);
+  symbols->init();
 }
 
 void wrenSymbolTableClear(WrenVM* vm, SymbolTable* symbols)
 {
-  wrenStringBufferClear(vm, symbols);
+  symbols->clear(vm);
 }
 
 int wrenSymbolTableAdd(WrenVM* vm, SymbolTable* symbols,
@@ -23,7 +19,7 @@ int wrenSymbolTableAdd(WrenVM* vm, SymbolTable* symbols,
   ObjString* symbol = AS_STRING(wrenNewStringLength(vm, name, length));
   
   wrenPushRoot(vm, &symbol->obj);
-  wrenStringBufferWrite(vm, symbols, symbol);
+  symbols->write(vm, symbol);
   wrenPopRoot(vm);
   
   return symbols->count - 1;

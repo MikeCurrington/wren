@@ -10,65 +10,70 @@
 // wren_value.h.
 typedef struct sObjString ObjString;
 
-// We need buffers of a few different types. To avoid lots of casting between
-// void* and back, we'll use the preprocessor as a poor man's generics and let
-// it generate a few type-specific ones.
-#define DECLARE_BUFFER(name, type)                                             \
-    typedef struct                                                             \
-    {                                                                          \
-      type* data;                                                              \
-      int count;                                                               \
-      int capacity;                                                            \
-    } name##Buffer;                                                            \
-    void wren##name##BufferInit(name##Buffer* buffer);                         \
-    void wren##name##BufferClear(WrenVM* vm, name##Buffer* buffer);            \
-    void wren##name##BufferFill(WrenVM* vm, name##Buffer* buffer, type data,   \
-                                int count);                                    \
-    void wren##name##BufferWrite(WrenVM* vm, name##Buffer* buffer, type data)
+// Returns the smallest power of two that is equal to or greater than [n].
+// Declared early here because Buffer<T>::fill() below relies on it.
+int wrenPowerOf2Ceil(int n);
 
-// This should be used once for each type instantiation, somewhere in a .c file.
-#define DEFINE_BUFFER(name, type)                                              \
-    void wren##name##BufferInit(name##Buffer* buffer)                          \
-    {                                                                          \
-      buffer->data = NULL;                                                     \
-      buffer->capacity = 0;                                                    \
-      buffer->count = 0;                                                       \
-    }                                                                          \
-                                                                               \
-    void wren##name##BufferClear(WrenVM* vm, name##Buffer* buffer)             \
-    {                                                                          \
-      wrenReallocate(vm, buffer->data, 0, 0);                                  \
-      wren##name##BufferInit(buffer);                                          \
-    }                                                                          \
-                                                                               \
-    void wren##name##BufferFill(WrenVM* vm, name##Buffer* buffer, type data,   \
-                                int count)                                     \
-    {                                                                          \
-      if (buffer->capacity < buffer->count + count)                            \
-      {                                                                        \
-        int capacity = wrenPowerOf2Ceil(buffer->count + count);                \
-        buffer->data = (type*)wrenReallocate(vm, buffer->data,                 \
-            buffer->capacity * sizeof(type), capacity * sizeof(type));         \
-        buffer->capacity = capacity;                                           \
-      }                                                                        \
-                                                                               \
-      for (int i = 0; i < count; i++)                                          \
-      {                                                                        \
-        buffer->data[buffer->count++] = data;                                  \
-      }                                                                        \
-    }                                                                          \
-                                                                               \
-    void wren##name##BufferWrite(WrenVM* vm, name##Buffer* buffer, type data)  \
-    {                                                                          \
-      wren##name##BufferFill(vm, buffer, data, 1);                             \
+// We need buffers of a few different types. A template provides the same
+// type-specific instances that the old preprocessor macros generated, but
+// with type safety and ordinary method call syntax.
+//
+// Note: Wren heap objects are raw-allocated (see ALLOCATE in wren_common.h),
+// so a Buffer embedded in one is never constructed. Call init() explicitly
+// right after allocation, just like the old wrenXBufferInit() functions did.
+template <typename T>
+struct Buffer
+{
+  T* data;
+  int count;
+  int capacity;
+
+  // Initializes the buffer to be empty.
+  void init()
+  {
+    data = nullptr;
+    capacity = 0;
+    count = 0;
+  }
+
+  // Clears the buffer, deallocating any data used by it. Use this to
+  // free a buffer when it's no longer needed.
+  void clear(WrenVM* vm)
+  {
+    wrenReallocate(vm, data, 0, 0);
+    init();
+  }
+
+  // Appends [count] copies of [value] to the buffer, growing it if needed.
+  void fill(WrenVM* vm, T value, int count)
+  {
+    if (capacity < this->count + count)
+    {
+      int newCapacity = wrenPowerOf2Ceil(this->count + count);
+      data = (T*)wrenReallocate(vm, data, capacity * sizeof(T),
+                                newCapacity * sizeof(T));
+      capacity = newCapacity;
     }
 
-DECLARE_BUFFER(Byte, uint8_t);
-DECLARE_BUFFER(Int, int);
-DECLARE_BUFFER(String, ObjString*);
+    for (int i = 0; i < count; i++)
+    {
+      data[this->count++] = value;
+    }
+  }
+
+  // Appends [value] to the buffer, growing it if needed.
+  void write(WrenVM* vm, T value)
+  {
+    fill(vm, value, 1);
+  }
+};
+
+using ByteBuffer   = Buffer<uint8_t>;
+using IntBuffer    = Buffer<int>;
+using StringBuffer = Buffer<ObjString*>;
 
 // TODO: Change this to use a map.
-typedef StringBuffer SymbolTable;
+using SymbolTable = StringBuffer;
 
 // Initializes the symbol table.
 void wrenSymbolTableInit(SymbolTable* symbols);
@@ -115,8 +120,6 @@ int wrenUtf8Decode(const uint8_t* bytes, uint32_t length);
 // returns 0.
 int wrenUtf8DecodeNumBytes(uint8_t byte);
 
-// Returns the smallest power of two that is equal to or greater than [n].
-int wrenPowerOf2Ceil(int n);
 
 // Validates that [value] is within `[0, count)`. Also allows
 // negative indices which map backwards from the end. Returns the valid positive
