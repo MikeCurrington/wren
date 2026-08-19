@@ -6,9 +6,8 @@
 
 // Reusable data structures and other utility functions.
 
-// Forward declare this here to break a cycle between wren_utils.h and
-// wren_value.h.
-typedef struct sObjString ObjString;
+// Forward declaration.
+struct ObjString;
 
 // Returns the smallest power of two that is equal to or greater than [n].
 // Declared early here because Buffer<T>::fill() below relies on it.

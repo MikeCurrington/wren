@@ -148,10 +148,8 @@ typedef struct
 using ValueBuffer = Buffer<Value>;
 
 // A heap-allocated string object.
-struct sObjString
+struct ObjString : public Obj
 {
-  Obj obj;
-
   // Number of bytes in the string, not including the null terminator.
   uint32_t length;
 
@@ -174,12 +172,9 @@ struct sObjString
 // be closed. When that happens, the value gets copied off the stack into the
 // upvalue itself. That way, it can have a longer lifetime than the stack
 // variable.
-struct ObjUpvalue
+// Note that upvalues are garbage collected, but they are not first class Wren objects.
+struct ObjUpvalue : public Obj
 {
-  // The object header. Note that upvalues have this because they are garbage
-  // collected, but they are not first class Wren objects.
-  Obj obj;
-
   // Pointer to the variable this upvalue is referencing.
   Value* value;
 
@@ -220,10 +215,8 @@ struct FnDebug
 //
 // While this is an Obj and is managed by the GC, it never appears as a
 // first-class object in Wren.
-struct ObjModule
+struct ObjModule : public Obj
 {
-  Obj obj;
-
   // The currently defined top-level variables.
   ValueBuffer variables;
 
@@ -243,10 +236,8 @@ struct ObjModule
 // representation of a function. This isn't strictly necessary if they function
 // has no upvalues, but lets the rest of the VM assume all called objects will
 // be closures.
-struct ObjFn
+struct ObjFn : public Obj
 {
-  Obj obj;
-  
   ByteBuffer code;
   ValueBuffer constants;
   
@@ -268,10 +259,8 @@ struct ObjFn
 
 // An instance of a first-class function and the environment it has closed over.
 // Unlike [ObjFn], this has captured the upvalues that the function accesses.
-struct ObjClosure
+struct ObjClosure : public Obj
 {
-  Obj obj;
-
   // The function that this closure is an instance of.
   ObjFn* fn;
 
@@ -312,10 +301,8 @@ enum FiberState
   FIBER_OTHER,
 };
 
-struct ObjFiber
+struct ObjFiber : public Obj
 {
-  Obj obj;
-  
   // The stack of value slots. This is used for holding local variables and
   // temporaries while the fiber is executing. It is heap-allocated and grown
   // as needed.
@@ -388,14 +375,18 @@ struct Method
 
 using MethodBuffer = Buffer<Method>;
 
-struct ObjClass
+struct ObjClass : public Obj
 {
-  Obj obj;
-  ObjClass* superclass;
+  ObjClass(int _numFields, ObjString* _name) 
+  : numFields(_numFields)
+  , name(_name) 
+  {}
+
+  ObjClass* superclass = nullptr;
 
   // The number of fields needed for an instance of this class, including all
   // of its superclass fields.
-  int numFields;
+  int numFields = 0;
 
   // The table of methods that are defined in or inherited by this class.
   // Methods are called by symbol, and the symbol directly maps to an index in
@@ -408,28 +399,24 @@ struct ObjClass
   MethodBuffer methods;
 
   // The name of the class.
-  ObjString* name;
+  ObjString* name = nullptr;
   
   // The ClassAttribute for the class, if any
   Value attributes;
 };
 
-struct ObjForeign
+struct ObjForeign : public Obj
 {
-  Obj obj;
   uint8_t data[FLEXIBLE_ARRAY];
 };
 
-struct ObjInstance
+struct ObjInstance : public Obj
 {
-  Obj obj;
   Value fields[FLEXIBLE_ARRAY];
 };
 
-struct ObjList
+struct ObjList : public Obj
 {
-  Obj obj;
-
   // The elements in the list.
   ValueBuffer elements;
 };
@@ -462,10 +449,8 @@ struct MapEntry
 // for a key, we will continue past tombstones, because the desired key may be
 // found after them if the key that was removed was part of a prior collision.
 // When the array gets resized, all tombstones are discarded.
-struct ObjMap
+struct ObjMap : public Obj
 {
-  Obj obj;
-
   // The number of entries allocated.
   uint32_t capacity;
 
@@ -476,10 +461,8 @@ struct ObjMap
   MapEntry* entries;
 };
 
-struct ObjRange
+struct ObjRange : public Obj
 {
-  Obj obj;
-
   // The beginning of the range.
   double from;
 

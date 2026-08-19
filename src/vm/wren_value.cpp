@@ -42,8 +42,8 @@ static void initObj(WrenVM* vm, Obj* obj, ObjType type, ObjClass* classObj)
 
 ObjClass* wrenNewSingleClass(WrenVM* vm, int numFields, ObjString* name)
 {
-  ObjClass* classObj = ALLOCATE(vm, ObjClass);
-  initObj(vm, &classObj->obj, OBJ_CLASS, nullptr);
+  ObjClass* classObj = new ObjClass(numFields, name);
+  initObj(vm, classObj, OBJ_CLASS, nullptr);
   classObj->superclass = nullptr;
   classObj->numFields = numFields;
   classObj->name = name;
@@ -88,7 +88,7 @@ ObjClass* wrenNewClass(WrenVM* vm, ObjClass* superclass, int numFields,
   wrenPushRoot(vm, AS_OBJ(metaclassName));
 
   ObjClass* metaclass = wrenNewSingleClass(vm, 0, AS_STRING(metaclassName));
-  metaclass->obj.classObj = vm->classClass;
+  metaclass->classObj = vm->classClass;
 
   wrenPopRoot(vm);
 
@@ -105,7 +105,7 @@ ObjClass* wrenNewClass(WrenVM* vm, ObjClass* superclass, int numFields,
   // bound.
   wrenPushRoot(vm, (Obj*)classObj);
 
-  classObj->obj.classObj = metaclass;
+  classObj->classObj = metaclass;
   wrenBindSuperclass(vm, classObj, superclass);
 
   wrenPopRoot(vm);
@@ -131,7 +131,7 @@ ObjClosure* wrenNewClosure(WrenVM* vm, ObjFn* fn)
 {
   ObjClosure* closure = ALLOCATE_FLEX(vm, ObjClosure,
                                       ObjUpvalue*, fn->numUpvalues);
-  initObj(vm, &closure->obj, OBJ_CLOSURE, vm->fnClass);
+  initObj(vm, closure, OBJ_CLOSURE, vm->fnClass);
 
   closure->fn = fn;
 
@@ -155,7 +155,7 @@ ObjFiber* wrenNewFiber(WrenVM* vm, ObjClosure* closure)
   Value* stack = ALLOCATE_ARRAY(vm, Value, stackCapacity);
   
   ObjFiber* fiber = ALLOCATE(vm, ObjFiber);
-  initObj(vm, &fiber->obj, OBJ_FIBER, vm->fiberClass);
+  initObj(vm, fiber, OBJ_FIBER, vm->fiberClass);
 
   fiber->stack = stack;
   fiber->stackTop = fiber->stack;
@@ -230,7 +230,7 @@ void wrenEnsureStack(WrenVM* vm, ObjFiber* fiber, int needed)
 ObjForeign* wrenNewForeign(WrenVM* vm, ObjClass* classObj, size_t size)
 {
   ObjForeign* object = ALLOCATE_FLEX(vm, ObjForeign, uint8_t, size);
-  initObj(vm, &object->obj, OBJ_FOREIGN, classObj);
+  initObj(vm, object, OBJ_FOREIGN, classObj);
 
   // Zero out the bytes.
   memset(object->data, 0, size);
@@ -244,7 +244,7 @@ ObjFn* wrenNewFunction(WrenVM* vm, ObjModule* module, int maxSlots)
   debug->sourceLines.init();
 
   ObjFn* fn = ALLOCATE(vm, ObjFn);
-  initObj(vm, &fn->obj, OBJ_FN, vm->fnClass);
+  initObj(vm, fn, OBJ_FN, vm->fnClass);
   
   fn->constants.init();
   fn->code.init();
@@ -268,7 +268,7 @@ Value wrenNewInstance(WrenVM* vm, ObjClass* classObj)
 {
   ObjInstance* instance = ALLOCATE_FLEX(vm, ObjInstance,
                                         Value, classObj->numFields);
-  initObj(vm, &instance->obj, OBJ_INSTANCE, classObj);
+  initObj(vm, instance, OBJ_INSTANCE, classObj);
 
   // Initialize fields to null.
   for (int i = 0; i < classObj->numFields; i++)
@@ -290,7 +290,7 @@ ObjList* wrenNewList(WrenVM* vm, uint32_t numElements)
   }
 
   ObjList* list = ALLOCATE(vm, ObjList);
-  initObj(vm, &list->obj, OBJ_LIST, vm->listClass);
+  initObj(vm, list, OBJ_LIST, vm->listClass);
   list->elements.capacity = numElements;
   list->elements.count = numElements;
   list->elements.data = elements;
@@ -346,7 +346,7 @@ Value wrenListRemoveAt(WrenVM* vm, ObjList* list, uint32_t index)
 ObjMap* wrenNewMap(WrenVM* vm)
 {
   ObjMap* map = ALLOCATE(vm, ObjMap);
-  initObj(vm, &map->obj, OBJ_MAP, vm->mapClass);
+  initObj(vm, map, OBJ_MAP, vm->mapClass);
   map->capacity = 0;
   map->count = 0;
   map->entries = nullptr;
@@ -646,7 +646,7 @@ ObjModule* wrenNewModule(WrenVM* vm, ObjString* name)
 Value wrenNewRange(WrenVM* vm, double from, double to, bool isInclusive)
 {
   ObjRange* range = ALLOCATE(vm, ObjRange);
-  initObj(vm, &range->obj, OBJ_RANGE, vm->rangeClass);
+  initObj(vm, range, OBJ_RANGE, vm->rangeClass);
   range->from = from;
   range->to = to;
   range->isInclusive = isInclusive;
@@ -662,7 +662,7 @@ Value wrenNewRange(WrenVM* vm, double from, double to, bool isInclusive)
 static ObjString* allocateString(WrenVM* vm, size_t length)
 {
   ObjString* string = ALLOCATE_FLEX(vm, ObjString, char, length + 1);
-  initObj(vm, &string->obj, OBJ_STRING, vm->stringClass);
+  initObj(vm, string, OBJ_STRING, vm->stringClass);
   string->length = (int)length;
   string->value[length] = '\0';
 
@@ -948,7 +948,7 @@ ObjUpvalue* wrenNewUpvalue(WrenVM* vm, Value* value)
   ObjUpvalue* upvalue = ALLOCATE(vm, ObjUpvalue);
 
   // Upvalues are never used as first-class objects, so don't need a class.
-  initObj(vm, &upvalue->obj, OBJ_UPVALUE, nullptr);
+  initObj(vm, upvalue, OBJ_UPVALUE, nullptr);
 
   upvalue->value = value;
   upvalue->closed = NULL_VAL;
@@ -996,7 +996,7 @@ void wrenGrayBuffer(WrenVM* vm, ValueBuffer* buffer)
 static void blackenClass(WrenVM* vm, ObjClass* classObj)
 {
   // The metaclass.
-  wrenGrayObj(vm, (Obj*)classObj->obj.classObj);
+  wrenGrayObj(vm, (Obj*)classObj->classObj);
 
   // The superclass.
   wrenGrayObj(vm, (Obj*)classObj->superclass);
@@ -1096,17 +1096,17 @@ static void blackenForeign(WrenVM* vm, ObjForeign* foreign)
 
 static void blackenInstance(WrenVM* vm, ObjInstance* instance)
 {
-  wrenGrayObj(vm, (Obj*)instance->obj.classObj);
+  wrenGrayObj(vm, (Obj*)instance->classObj);
 
   // Mark the fields.
-  for (int i = 0; i < instance->obj.classObj->numFields; i++)
+  for (int i = 0; i < instance->classObj->numFields; i++)
   {
     wrenGrayValue(vm, instance->fields[i]);
   }
 
   // Keep track of how much memory is still in use.
   vm->bytesAllocated += sizeof(ObjInstance);
-  vm->bytesAllocated += sizeof(Value) * instance->obj.classObj->numFields;
+  vm->bytesAllocated += sizeof(Value) * instance->classObj->numFields;
 }
 
 static void blackenList(WrenVM* vm, ObjList* list)

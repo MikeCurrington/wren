@@ -18,7 +18,7 @@ int wrenSymbolTableAdd(WrenVM* vm, SymbolTable* symbols,
 {
   ObjString* symbol = AS_STRING(wrenNewStringLength(vm, name, length));
   
-  wrenPushRoot(vm, &symbol->obj);
+  wrenPushRoot(vm, symbol);
   symbols->write(vm, symbol);
   wrenPopRoot(vm);
   
@@ -53,7 +53,7 @@ void wrenBlackenSymbolTable(WrenVM* vm, SymbolTable* symbolTable)
 {
   for (int i = 0; i < symbolTable->count; i++)
   {
-    wrenGrayObj(vm, &symbolTable->data[i]->obj);
+    wrenGrayObj(vm, symbolTable->data[i]);
   }
   
   // Keep track of how much memory is still in use.

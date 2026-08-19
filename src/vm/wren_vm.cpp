@@ -349,7 +349,7 @@ static void bindMethod(WrenVM* vm, int methodType, int symbol,
                        ObjModule* module, ObjClass* classObj, Value methodValue)
 {
   const char* className = classObj->name->value;
-  if (methodType == CODE_METHOD_STATIC) classObj = classObj->obj.classObj;
+  if (methodType == CODE_METHOD_STATIC) classObj = classObj->classObj;
 
   Method method;
   if (IS_STRING(methodValue))
@@ -687,7 +687,7 @@ void wrenFinalizeForeign(WrenVM* vm, ObjForeign* foreign)
   if (symbol == -1) return;
 
   // If the class doesn't have a finalizer, bail out.
-  ObjClass* classObj = foreign->obj.classObj;
+  ObjClass* classObj = foreign->classObj;
   if (symbol >= classObj->methods.count) return;
 
   Method* method = &classObj->methods.data[symbol];
@@ -944,7 +944,7 @@ static WrenInterpretResult runInterpreter(WrenVM* vm, ObjFiber* fiber)
       Value receiver = stackStart[0];
       ASSERT(IS_INSTANCE(receiver), "Receiver should be instance.");
       ObjInstance* instance = AS_INSTANCE(receiver);
-      ASSERT(field < instance->obj.classObj->numFields, "Out of bounds field.");
+      ASSERT(field < instance->classObj->numFields, "Out of bounds field.");
       PUSH(instance->fields[field]);
       DISPATCH();
     }
@@ -1119,7 +1119,7 @@ static WrenInterpretResult runInterpreter(WrenVM* vm, ObjFiber* fiber)
       Value receiver = stackStart[0];
       ASSERT(IS_INSTANCE(receiver), "Receiver should be instance.");
       ObjInstance* instance = AS_INSTANCE(receiver);
-      ASSERT(field < instance->obj.classObj->numFields, "Out of bounds field.");
+      ASSERT(field < instance->classObj->numFields, "Out of bounds field.");
       instance->fields[field] = PEEK();
       DISPATCH();
     }
@@ -1130,7 +1130,7 @@ static WrenInterpretResult runInterpreter(WrenVM* vm, ObjFiber* fiber)
       Value receiver = POP();
       ASSERT(IS_INSTANCE(receiver), "Receiver should be instance.");
       ObjInstance* instance = AS_INSTANCE(receiver);
-      ASSERT(field < instance->obj.classObj->numFields, "Out of bounds field.");
+      ASSERT(field < instance->classObj->numFields, "Out of bounds field.");
       PUSH(instance->fields[field]);
       DISPATCH();
     }
@@ -1141,7 +1141,7 @@ static WrenInterpretResult runInterpreter(WrenVM* vm, ObjFiber* fiber)
       Value receiver = POP();
       ASSERT(IS_INSTANCE(receiver), "Receiver should be instance.");
       ObjInstance* instance = AS_INSTANCE(receiver);
-      ASSERT(field < instance->obj.classObj->numFields, "Out of bounds field.");
+      ASSERT(field < instance->classObj->numFields, "Out of bounds field.");
       instance->fields[field] = PEEK();
       DISPATCH();
     }
