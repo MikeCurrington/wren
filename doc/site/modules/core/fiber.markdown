@@ -20,6 +20,27 @@ If the message is `null`, does nothing.
 
 The currently executing fiber.
 
+### Fiber.**exit**(value)
+
+Exits the current fiber immediately with `value` as its result. Unlike
+`Fiber.abort()`, no runtime error is raised and the fiber's `error` remains
+`null`.
+
+<pre class="snippet">
+var fiber = Fiber.new {
+  System.print("working")
+  Fiber.exit("result")
+  System.print("this does not get reached")
+}
+
+System.print(fiber.call()) //> result
+</pre>
+
+The value becomes the return value of the `call()` or `try()` method that ran
+the fiber. The fiber is then done and can no longer be run. If there is no
+fiber to return to, this stops the interpreter, and the value becomes the
+result of the `wrenInterpret()` or `wrenCall()` invocation.
+
 ### Fiber.**new**(function)
 
 Creates a new fiber that executes `function` in a separate coroutine when the

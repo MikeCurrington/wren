@@ -284,7 +284,7 @@ static ObjUpvalue* captureUpvalue(WrenVM* vm, ObjFiber* fiber, Value* local)
 
 // Closes any open upvalues that have been created for stack slots at [last]
 // and above.
-static void closeUpvalues(ObjFiber* fiber, Value* last)
+void wrenCloseUpvalues(ObjFiber* fiber, Value* last)
 {
   while (fiber->openUpvalues != nullptr &&
          fiber->openUpvalues->value >= last)
@@ -1059,6 +1059,10 @@ static WrenInterpretResult runInterpreter(WrenVM* vm, ObjFiber* fiber)
             fiber = vm->fiber;
             if (fiber == nullptr) return WREN_RESULT_SUCCESS;
             if (wrenHasError(fiber)) RUNTIME_ERROR();
+
+            // If the fiber is complete, it exited with a value using
+            // Fiber.exit() and had no caller to return to, so end it.
+            if (fiber->numFrames == 0) return WREN_RESULT_SUCCESS;
             LOAD_FRAME();
           }
           break;
@@ -1209,7 +1213,7 @@ static WrenInterpretResult runInterpreter(WrenVM* vm, ObjFiber* fiber)
 
     CASE_CODE(CLOSE_UPVALUE):
       // Close the upvalue for the local if we have one.
-      closeUpvalues(fiber, fiber->stackTop - 1);
+      wrenCloseUpvalues(fiber, fiber->stackTop - 1);
       DROP();
       DISPATCH();
 
@@ -1219,7 +1223,7 @@ static WrenInterpretResult runInterpreter(WrenVM* vm, ObjFiber* fiber)
       fiber->numFrames--;
 
       // Close any upvalues still in scope.
-      closeUpvalues(fiber, stackStart);
+      wrenCloseUpvalues(fiber, stackStart);
 
       // If the fiber is complete, end it.
       if (fiber->numFrames == 0)

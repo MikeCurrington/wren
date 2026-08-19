@@ -97,6 +97,10 @@ int APITest_Run(WrenVM* vm, const char* inTestName)
   {
     return callWrenCallRootRunTests(vm);
   }
+  else if (strstr(inTestName, "/fiber_exit.wren") != NULL)
+  {
+    return fiberExitRunTests(vm);
+  }
   else if (strstr(inTestName, "/reset_stack_after_call_abort.wren") != NULL)
   {
     return resetStackAfterCallAbortRunTests(vm);

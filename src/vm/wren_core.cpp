@@ -157,6 +157,40 @@ DEF_PRIMITIVE(fiber_error)
   RETURN_VAL(AS_FIBER(args[0])->error);
 }
 
+DEF_PRIMITIVE(fiber_exit)
+{
+  ObjFiber* current = vm->fiber;
+
+  // The fiber will never run again, so close every upvalue it still has open,
+  // as if all of its functions had returned.
+  wrenCloseUpvalues(current, current->stack);
+
+  // Discard all of its call frames, marking the fiber as finished.
+  current->numFrames = 0;
+
+  // Unhook this fiber from the one that called it.
+  ObjFiber* resumingFiber = current->caller;
+  current->caller = nullptr;
+  current->state = FIBER_OTHER;
+
+  if (resumingFiber != nullptr)
+  {
+    // Make the caller's call() or try() return the exit value.
+    resumingFiber->stackTop[-1] = args[1];
+    vm->fiber = resumingFiber;
+  }
+  else
+  {
+    // There is no fiber to return to. Store the final result value at the
+    // beginning of the stack so the C API can get it. Leaving [vm->fiber]
+    // pointing at this (now finished) fiber tells the interpreter to stop.
+    current->stack[0] = args[1];
+    current->stackTop = current->stack + 1;
+  }
+
+  return false;
+}
+
 DEF_PRIMITIVE(fiber_isDone)
 {
   ObjFiber* runFiber = AS_FIBER(args[0]);
@@ -1292,6 +1326,7 @@ void wrenInitializeCore(WrenVM* vm)
   vm->fiberClass = AS_CLASS(wrenFindVariable(vm, coreModule, "Fiber"));
   PRIMITIVE(vm->fiberClass->classObj, "new(_)", fiber_new);
   PRIMITIVE(vm->fiberClass->classObj, "abort(_)", fiber_abort);
+  PRIMITIVE(vm->fiberClass->classObj, "exit(_)", fiber_exit);
   PRIMITIVE(vm->fiberClass->classObj, "current", fiber_current);
   PRIMITIVE(vm->fiberClass->classObj, "suspend()", fiber_suspend);
   PRIMITIVE(vm->fiberClass->classObj, "yield()", fiber_yield);
