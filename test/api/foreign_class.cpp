@@ -62,7 +62,7 @@ static void pointToString(WrenVM* vm)
 {
   double* coordinates = (double*)wrenGetSlotForeign(vm, 0);
   char result[100];
-  sprintf(result, "(%g, %g, %g)",
+  snprintf(result, sizeof(result), "(%g, %g, %g)",
       coordinates[0], coordinates[1], coordinates[2]);
   wrenSetSlotString(vm, 0, result);
 }

@@ -113,7 +113,7 @@ static void ensure(WrenVM* vm)
   }
 
   char result[100];
-  sprintf(result, "%d -> %d (%d)", before, after, sum);
+  snprintf(result, sizeof(result), "%d -> %d (%d)", before, after, sum);
   wrenSetSlotString(vm, 0, result);
 }
 
@@ -147,7 +147,7 @@ static void ensureOutsideForeign(WrenVM* vm)
   wrenFreeVM(otherVM);
 
   char result[100];
-  sprintf(result, "%d -> %d (%d)", before, after, sum);
+  snprintf(result, sizeof(result), "%d -> %d (%d)", before, after, sum);
   wrenSetSlotString(vm, 0, result);
 }
 

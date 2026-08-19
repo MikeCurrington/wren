@@ -42,6 +42,9 @@
 // The representation is controlled by the `WREN_NAN_TAGGING` define. If that's
 // defined, Nan tagging is used.
 
+// Forward declarations
+struct ObjClass;
+
 // These macros cast a Value to one of the specific object types. These do *not*
 // perform any validation, so must only be used after the Value has been
 // ensured to be the right type.
@@ -101,11 +104,8 @@ typedef enum {
   OBJ_UPVALUE
 } ObjType;
 
-typedef struct sObjClass ObjClass;
-
 // Base struct for all heap-allocated objects.
-typedef struct sObj Obj;
-struct sObj
+struct Obj
 {
   ObjType type;
   bool isDark;
@@ -114,7 +114,7 @@ struct sObj
   ObjClass* classObj;
 
   // The next object in the linked list of all currently allocated objects.
-  struct sObj* next;
+  Obj* next;
 };
 
 #if WREN_NAN_TAGGING
@@ -174,7 +174,7 @@ struct sObjString
 // be closed. When that happens, the value gets copied off the stack into the
 // upvalue itself. That way, it can have a longer lifetime than the stack
 // variable.
-typedef struct sObjUpvalue
+struct ObjUpvalue
 {
   // The object header. Note that upvalues have this because they are garbage
   // collected, but they are not first class Wren objects.
@@ -190,8 +190,8 @@ typedef struct sObjUpvalue
 
   // Open upvalues are stored in a linked list by the fiber. This points to the
   // next upvalue in that list.
-  struct sObjUpvalue* next;
-} ObjUpvalue;
+  ObjUpvalue* next;
+};
 
 // The type of a primitive function.
 //
@@ -205,7 +205,7 @@ typedef bool (*Primitive)(WrenVM* vm, Value* args);
 // struct instead of in ObjFn.
 // Stores debugging information for a function used for things like stack
 // traces.
-typedef struct
+struct FnDebug
 {
   // The name of the function. Heap allocated and owned by the FnDebug.
   char* name;
@@ -214,13 +214,13 @@ typedef struct
   // bytecode in the function's bytecode array. The value of that element is
   // the line in the source code that generated that instruction.
   IntBuffer sourceLines;
-} FnDebug;
+};
 
 // A loaded module and the top-level variables it defines.
 //
 // While this is an Obj and is managed by the GC, it never appears as a
 // first-class object in Wren.
-typedef struct
+struct ObjModule
 {
   Obj obj;
 
@@ -233,7 +233,7 @@ typedef struct
 
   // The name of the module.
   ObjString* name;
-} ObjModule;
+};
 
 // A function object. It wraps and owns the bytecode and other debug information
 // for a callable chunk of code.
@@ -243,7 +243,7 @@ typedef struct
 // representation of a function. This isn't strictly necessary if they function
 // has no upvalues, but lets the rest of the VM assume all called objects will
 // be closures.
-typedef struct
+struct ObjFn
 {
   Obj obj;
   
@@ -264,11 +264,11 @@ typedef struct
   // only be set for fns, and not ObjFns that represent methods or scripts.
   int arity;
   FnDebug* debug;
-} ObjFn;
+};
 
 // An instance of a first-class function and the environment it has closed over.
 // Unlike [ObjFn], this has captured the upvalues that the function accesses.
-typedef struct
+struct ObjClosure
 {
   Obj obj;
 
@@ -277,9 +277,9 @@ typedef struct
 
   // The upvalues this function has closed over.
   ObjUpvalue* upvalues[FLEXIBLE_ARRAY];
-} ObjClosure;
+};
 
-typedef struct
+struct CallFrame
 {
   // Pointer to the current (really next-to-be-executed) instruction in the
   // function's bytecode.
@@ -292,11 +292,11 @@ typedef struct
   // the receiver, followed by the function's parameters, then local variables
   // and temporaries.
   Value* stackStart;
-} CallFrame;
+};
 
 // Tracks how this fiber has been invoked, aside from the ways that can be
 // detected from the state of other fields in the fiber.
-typedef enum
+enum FiberState
 {
   // The fiber is being run from another fiber using a call to `try()`.
   FIBER_TRY,
@@ -310,9 +310,9 @@ typedef enum
   // finished running and is done. If [numFrames] is one and that frame's `ip`
   // points to the first byte of code, the fiber has not been started yet.
   FIBER_OTHER,
-} FiberState;
+};
 
-typedef struct sObjFiber
+struct ObjFiber
 {
   Obj obj;
   
@@ -344,16 +344,16 @@ typedef struct sObjFiber
   
   // The fiber that ran this one. If this fiber is yielded, control will resume
   // to this one. May be `NULL`.
-  struct sObjFiber* caller;
+  ObjFiber* caller;
   
   // If the fiber failed because of a runtime error, this will contain the
   // error object. Otherwise, it will be null.
   Value error;
   
   FiberState state;
-} ObjFiber;
+};
 
-typedef enum
+enum MethodType
 {
   // A primitive method implemented in C in the VM. Unlike foreign methods,
   // this can directly manipulate the fiber's stack.
@@ -370,9 +370,9 @@ typedef enum
   
   // No method for the given symbol.
   METHOD_NONE
-} MethodType;
+};
 
-typedef struct
+struct Method
 {
   MethodType type;
 
@@ -384,11 +384,11 @@ typedef struct
     WrenForeignMethodFn foreign;
     ObjClosure* closure;
   } as;
-} Method;
+};
 
 using MethodBuffer = Buffer<Method>;
 
-struct sObjClass
+struct ObjClass
 {
   Obj obj;
   ObjClass* superclass;
@@ -414,27 +414,27 @@ struct sObjClass
   Value attributes;
 };
 
-typedef struct
+struct ObjForeign
 {
   Obj obj;
   uint8_t data[FLEXIBLE_ARRAY];
-} ObjForeign;
+};
 
-typedef struct
+struct ObjInstance
 {
   Obj obj;
   Value fields[FLEXIBLE_ARRAY];
-} ObjInstance;
+};
 
-typedef struct
+struct ObjList
 {
   Obj obj;
 
   // The elements in the list.
   ValueBuffer elements;
-} ObjList;
+};
 
-typedef struct
+struct MapEntry
 {
   // The entry's key, or UNDEFINED_VAL if the entry is not in use.
   Value key;
@@ -443,7 +443,7 @@ typedef struct
   // be false to indicate an open available entry or true to indicate a
   // tombstone -- an entry that was previously in use but was then deleted.
   Value value;
-} MapEntry;
+};
 
 // A hash table mapping keys to values.
 //
@@ -462,7 +462,7 @@ typedef struct
 // for a key, we will continue past tombstones, because the desired key may be
 // found after them if the key that was removed was part of a prior collision.
 // When the array gets resized, all tombstones are discarded.
-typedef struct
+struct ObjMap
 {
   Obj obj;
 
@@ -474,9 +474,9 @@ typedef struct
 
   // Pointer to a contiguous array of [capacity] entries.
   MapEntry* entries;
-} ObjMap;
+};
 
-typedef struct
+struct ObjRange
 {
   Obj obj;
 
@@ -488,7 +488,7 @@ typedef struct
 
   // True if [to] is included in the range.
   bool isInclusive;
-} ObjRange;
+};
 
 // An IEEE 754 double-precision float is a 64-bit value with bits laid out like:
 //

@@ -45,8 +45,7 @@
 // The buffer size used to format a compile error message, excluding the header
 // with the module name and error location. Using a hardcoded buffer for this
 // is kind of hairy, but fortunately we can control what the longest possible
-// message is and handle that. Ideally, we'd use `snprintf()`, but that's not
-// available in standard C++98.
+// message is and handle that.
 #define ERROR_MESSAGE_SIZE (80 + MAX_VARIABLE_NAME + 15)
 
 typedef enum
@@ -427,8 +426,8 @@ static void printError(Parser* parser, int line, const char* label,
 
   // Format the label and message.
   char message[ERROR_MESSAGE_SIZE];
-  int length = sprintf(message, "%s: ", label);
-  length += vsprintf(message + length, format, args);
+  int length = snprintf(message, sizeof(message), "%s: ", label);
+  length += vsnprintf(message + length, sizeof(message) - length, format, args);
   ASSERT(length < ERROR_MESSAGE_SIZE, "Error should not exceed buffer.");
 
   ObjString* module = parser->module->name;
@@ -480,11 +479,11 @@ static void error(Compiler* compiler, const char* format, ...)
     char label[10 + MAX_VARIABLE_NAME + 4 + 1];
     if (token->length <= MAX_VARIABLE_NAME)
     {
-      sprintf(label, "Error at '%.*s'", token->length, token->start);
+      snprintf(label, sizeof(label), "Error at '%.*s'", token->length, token->start);
     }
     else
     {
-      sprintf(label, "Error at '%.*s...'", MAX_VARIABLE_NAME, token->start);
+      snprintf(label, sizeof(label), "Error at '%.*s...'", MAX_VARIABLE_NAME, token->start);
     }
     printError(compiler->parser, token->line, label, format, args);
   }
@@ -4120,7 +4119,7 @@ static void copyMethodAttributes(Compiler* compiler, bool isForeign,
   char fullSignatureWithPrefix[MAX_METHOD_SIGNATURE + 8 + 7];
   const char* foreignPrefix = isForeign ? "foreign " : "";
   const char* staticPrefix = isStatic ? "static " : "";
-  sprintf(fullSignatureWithPrefix, "%s%s%.*s", foreignPrefix, staticPrefix, 
+  snprintf(fullSignatureWithPrefix, sizeof(fullSignatureWithPrefix), "%s%s%.*s", foreignPrefix, staticPrefix,
                                                length, fullSignature);
   fullSignatureWithPrefix[fullLength] = '\0';
 
