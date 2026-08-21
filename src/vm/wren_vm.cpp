@@ -1079,8 +1079,15 @@ static WrenInterpretResult runInterpreter(WrenVM* vm, ObjFiber* fiber)
           break;
 
         case METHOD_FOREIGN:
+          // A foreign method may call wrenEnsureSlots(), which can grow (and
+          // reallocate) the fiber's value stack. Store the cached frame state
+          // first and refresh it afterwards, like the other call types do, so
+          // the interpreter's local stack pointers aren't left dangling when
+          // the old stack buffer is freed.
+          STORE_FRAME();
           callForeign(vm, fiber, method->as.foreign, numArgs);
           if (wrenHasError(fiber)) RUNTIME_ERROR();
+          LOAD_FRAME();
           break;
 
         case METHOD_BLOCK:
@@ -1272,8 +1279,14 @@ static WrenInterpretResult runInterpreter(WrenVM* vm, ObjFiber* fiber)
 
     CASE_CODE(FOREIGN_CONSTRUCT):
       ASSERT(IS_CLASS(stackStart[0]), "'this' should be a class.");
+      // A foreign allocator may call wrenEnsureSlots(), which can grow (and
+      // reallocate) the fiber's value stack. Store the cached frame state
+      // first and refresh it afterwards so the interpreter's local stack
+      // pointers aren't left dangling when the old stack buffer is freed.
+      STORE_FRAME();
       createForeign(vm, fiber, stackStart);
       if (wrenHasError(fiber)) RUNTIME_ERROR();
+      LOAD_FRAME();
       DISPATCH();
 
     CASE_CODE(CLOSURE):
@@ -1660,6 +1673,14 @@ void wrenEnsureSlots(WrenVM* vm, int numSlots)
   // Grow the stack if needed.
   int needed = (int)(vm->apiStack - vm->fiber->stack) + numSlots;
   wrenEnsureStack(vm, vm->fiber, needed);
+  
+  // Initialize any newly exposed slots. The memory between the old stack top
+  // and the new one is uninitialized, and since the garbage collector scans
+  // every slot up to stackTop, garbage there can crash the GC.
+  for (Value* slot = vm->fiber->stackTop; slot < vm->apiStack + numSlots; slot++)
+  {
+    *slot = NULL_VAL;
+  }
   
   vm->fiber->stackTop = vm->apiStack + numSlots;
 }

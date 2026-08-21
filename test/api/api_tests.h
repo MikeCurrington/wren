@@ -15,6 +15,7 @@
 #include "fiber_exit.h"
 #include "get_variable.h"
 #include "foreign_class.h"
+#include "foreign_stack_move.h"
 #include "handle.h"
 #include "lists.h"
 #include "maps.h"

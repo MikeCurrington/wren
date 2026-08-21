@@ -34,6 +34,9 @@ WrenForeignMethodFn APITest_bindForeignMethod(
   method = foreignClassBindMethod(fullName);
   if (method != NULL) return method;
 
+  method = foreignStackMoveBindMethod(fullName);
+  if (method != NULL) return method;
+
   method = handleBindMethod(fullName);
   if (method != NULL) return method;
 
@@ -70,6 +73,9 @@ WrenForeignClassMethods APITest_bindForeignClass(
   foreignClassBindClass(className, &methods);
   if (methods.allocate != NULL) return methods;
 
+  foreignStackMoveBindClass(className, &methods);
+  if (methods.allocate != NULL) return methods;
+
   resetStackAfterForeignConstructBindClass(className, &methods);
   if (methods.allocate != NULL) return methods;
 
@@ -100,6 +106,10 @@ int APITest_Run(WrenVM* vm, const char* inTestName)
   else if (strstr(inTestName, "/fiber_exit.wren") != NULL)
   {
     return fiberExitRunTests(vm);
+  }
+  else if (strstr(inTestName, "/foreign_stack_move.wren") != NULL)
+  {
+    return foreignStackMoveRunTests(vm);
   }
   else if (strstr(inTestName, "/reset_stack_after_call_abort.wren") != NULL)
   {
