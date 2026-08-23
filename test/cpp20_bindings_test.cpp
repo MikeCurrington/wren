@@ -130,6 +130,28 @@ public:
 
 int TrackedResource::finalizeCount = 0;
 
+// Test classes for foreign / shared_ptr return values
+class Widget {
+public:
+  int counter = 0;
+  std::string tag = "widget";
+  std::shared_ptr<Widget> child;
+
+  static std::shared_ptr<Widget> root;
+
+  void bump(int by) { counter += by; }
+  std::shared_ptr<Widget> getChild() { return child; }
+  Widget copy() const { Widget w; w.counter = counter; w.tag = tag; return w; }
+  static std::shared_ptr<Widget> getRoot() { return root; }
+  static std::shared_ptr<Widget> make(int start) {
+    auto w = std::make_shared<Widget>();
+    w->counter = start;
+    return w;
+  }
+};
+
+std::shared_ptr<Widget> Widget::root;
+
 int main() {
   printf("Testing C++20 Foreign Bindings API\n");
   printf("=====================================\n\n");
@@ -475,6 +497,57 @@ System.print("p1 x after x assignment: %(p1.getX)")
 
   result = vm.interpret("test12", test12Source);
   TEST_ASSERT(result == WREN_RESULT_SUCCESS, "External class test");
+  printf("\n");
+
+  // Test 13: foreign / shared_ptr return values
+  {
+    printf("Test 13: foreign and shared_ptr return values\n");
+    auto& mod = vm.module("test_returns");
+    auto w = mod.klass<Widget>("Widget");
+    w.func<&Widget::bump, int>("bump");
+    w.func<&Widget::getChild>("getChild");
+    w.func<&Widget::copy>("copy");
+    w.funcStatic<&Widget::getRoot>("root");
+    w.funcStatic<&Widget::make, int>("make");
+    w.varReadOnly<&Widget::counter>("counter");
+    w.varReadOnly<&Widget::tag>("tag");
+  }
+
+  // Prepared shared object graph: root(1) -> child(7). Wren mutations made
+  // through getChild() must reach the C++ side (shared ownership), while
+  // mutations of a copy() must not.
+  auto sharedChild = std::make_shared<Widget>();
+  sharedChild->counter = 7;
+  sharedChild->tag = "child";
+  Widget::root = std::make_shared<Widget>();
+  Widget::root->counter = 1;
+  Widget::root->child = sharedChild;
+
+  const char* test13Source = R"WREN(
+import "test_returns" for Widget
+
+var root = Widget.root()
+System.print("root counter: %(root.counter)")
+
+var child = root.getChild()
+System.print("child counter: %(child.counter)")
+System.print("child tag: %(child.tag)")
+child.bump(5)
+
+var copy = root.copy()
+System.print("copy counter: %(copy.counter)")
+copy.bump(100)
+System.print("root counter after copy bump: %(root.counter)")
+
+var fresh = Widget.make(42)
+System.print("fresh counter: %(fresh.counter)")
+)WREN";
+
+  result = vm.interpret("test13", test13Source);
+  TEST_ASSERT(result == WREN_RESULT_SUCCESS, "Foreign/shared_ptr returns test");
+  TEST_ASSERT(sharedChild->counter == 12, "shared_ptr return shares ownership");
+  TEST_ASSERT(Widget::root->counter == 1, "foreign by-value return is a copy");
+  Widget::root.reset();
   printf("\n");
 
   // Summary
