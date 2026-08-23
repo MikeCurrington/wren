@@ -49,7 +49,7 @@ void metaGetModuleVariables(WrenVM* vm)
   }
     
   ObjModule* module = AS_MODULE(moduleValue);
-  ObjList* names = wrenConstruct<ObjList>(vm, 0, vm, module->variableNames.count);
+  ObjList* names = wrenConstruct<ObjList>(vm, 0, module->variableNames.count);
   vm->apiStack[0] = OBJ_VAL(names);
 
   // Initialize the elements to null in case a collection happens when we

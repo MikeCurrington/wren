@@ -157,7 +157,7 @@ template <typename T, typename... Args>
 T* wrenConstruct(WrenVM* vm, size_t flexBytes, Args&&... args)
 {
   void* memory = wrenReallocate(vm, nullptr, 0, sizeof(T) + flexBytes);
-  return new (memory) T(std::forward<Args>(args)...);
+  return new (memory) T(vm, std::forward<Args>(args)...);
 }
 
 #if WREN_NAN_TAGGING
@@ -255,7 +255,7 @@ typedef bool (*Primitive)(WrenVM* vm, Value* args);
 struct FnDebug
 {
   // Creates an empty set of debug information.
-  FnDebug();
+  FnDebug(WrenVM*);
 
   // The name of the function. Heap allocated and owned by the FnDebug.
   char* name;

@@ -511,8 +511,7 @@ static int addConstant(Compiler* compiler, Value constant)
     
     if (compiler->constants == nullptr)
     {
-      compiler->constants = wrenConstruct<ObjMap>(compiler->parser->vm, 0,
-                                                  compiler->parser->vm);
+      compiler->constants = wrenConstruct<ObjMap>(compiler->parser->vm, 0);
     }
     wrenMapSet(compiler->parser->vm, compiler->constants, constant,
                NUM_VAL(compiler->fn->constants.count - 1));
@@ -580,13 +579,13 @@ static void initCompiler(Compiler* compiler, Parser* parser, Compiler* parent,
   }
   
   compiler->numAttributes = 0;
-  compiler->attributes = wrenConstruct<ObjMap>(parser->vm, 0, parser->vm);
+  compiler->attributes = wrenConstruct<ObjMap>(parser->vm, 0);
 
   // Create the debug info before the function so that allocating it can't
   // trigger a collection while the function object exists but isn't
   // reachable yet.
   FnDebug* debug = wrenConstruct<FnDebug>(parser->vm, 0);
-  compiler->fn = wrenConstruct<ObjFn>(parser->vm, 0, parser->vm,
+  compiler->fn = wrenConstruct<ObjFn>(parser->vm, 0,
                                       parser->module, compiler->numLocals,
                                       debug);
 }
@@ -3574,7 +3573,7 @@ static void classDefinition(Compiler* compiler, bool isForeign)
   // Allocate attribute maps if necessary. 
   // A method will allocate the methods one if needed
   classInfo.classAttributes = compiler->attributes->count > 0 
-        ? wrenConstruct<ObjMap>(compiler->parser->vm, 0, compiler->parser->vm) 
+        ? wrenConstruct<ObjMap>(compiler->parser->vm, 0) 
         : nullptr;
   classInfo.methodAttributes = nullptr;
   // Copy any existing attributes into the class
@@ -3969,7 +3968,7 @@ static void addToAttributeGroup(Compiler* compiler,
   Value groupMapValue = wrenMapGet(compiler->attributes, group);
   if(IS_UNDEFINED(groupMapValue)) 
   {
-    groupMapValue = OBJ_VAL(wrenConstruct<ObjMap>(vm, 0, vm));
+    groupMapValue = OBJ_VAL(wrenConstruct<ObjMap>(vm, 0));
     wrenMapSet(vm, compiler->attributes, group, groupMapValue);
   }
 
@@ -3982,7 +3981,7 @@ static void addToAttributeGroup(Compiler* compiler,
   Value keyItemsValue = wrenMapGet(groupMap, key);
   if(IS_UNDEFINED(keyItemsValue)) 
   {
-    keyItemsValue = OBJ_VAL(wrenConstruct<ObjList>(vm, 0, vm, 0));
+    keyItemsValue = OBJ_VAL(wrenConstruct<ObjList>(vm, 0, 0));
     wrenMapSet(vm, groupMap, key, keyItemsValue);
   }
 
@@ -4115,7 +4114,7 @@ static void copyMethodAttributes(Compiler* compiler, bool isForeign,
   WrenVM* vm = compiler->parser->vm;
   
   // Make a map for this method to copy into
-  ObjMap* methodAttr = wrenConstruct<ObjMap>(vm, 0, vm);
+  ObjMap* methodAttr = wrenConstruct<ObjMap>(vm, 0);
   wrenPushRoot(vm, (Obj*)methodAttr);
   copyAttributes(compiler, methodAttr);
 
@@ -4131,7 +4130,7 @@ static void copyMethodAttributes(Compiler* compiler, bool isForeign,
   fullSignatureWithPrefix[fullLength] = '\0';
 
   if(compiler->enclosingClass->methodAttributes == nullptr) {
-    compiler->enclosingClass->methodAttributes = wrenConstruct<ObjMap>(vm, 0, vm);
+    compiler->enclosingClass->methodAttributes = wrenConstruct<ObjMap>(vm, 0);
   }
   
   // Store the method attributes in the class map

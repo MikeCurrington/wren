@@ -54,7 +54,7 @@ ObjClass::ObjClass(WrenVM* vm, int _numFields, ObjString* _name)
 
 ObjClass* wrenNewSingleClass(WrenVM* vm, int numFields, ObjString* name)
 {
-  return wrenConstruct<ObjClass>(vm, 0, vm, numFields, name);
+  return wrenConstruct<ObjClass>(vm, 0, numFields, name);
 }
 
 void wrenBindSuperclass(WrenVM* vm, ObjClass* subclass, ObjClass* superclass)
@@ -234,7 +234,7 @@ ObjForeign::ObjForeign(WrenVM* vm, ObjClass* _classObj, size_t size)
   memset(data, 0, size);
 }
 
-FnDebug::FnDebug()
+FnDebug::FnDebug(WrenVM*)
 {
   name = nullptr;
   // The source lines buffer constructs itself empty.
@@ -647,7 +647,7 @@ ObjString::ObjString(WrenVM* vm, size_t _length)
 // hash.
 static ObjString* allocateString(WrenVM* vm, size_t length)
 {
-  return wrenConstruct<ObjString>(vm, length + 1, vm, length);
+  return wrenConstruct<ObjString>(vm, length + 1, length);
 }
 
 // Calculates and stores the hash code for [string].
