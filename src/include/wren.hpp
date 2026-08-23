@@ -103,6 +103,19 @@ struct ForeignWrapper {
 };
 
 // ===========================================================================
+// ClassId — per-type record of the module/class name a C++ type is bound to
+// (filled in by Foreign<T> when Module::klass<T>("Name") registers the
+// class). setReturn uses it to look up the Wren class when boxing return
+// values: during a foreign method call slot 0 holds the receiver, so the
+// class has to be fetched into a scratch slot first.
+// ===========================================================================
+template <typename T>
+struct ClassId {
+  static inline std::string moduleName;
+  static inline std::string className;
+};
+
+// ===========================================================================
 // Type converters: C++ type <-> Wren slot
 // ===========================================================================
 template <typename T, typename = void> struct Converter;
@@ -159,6 +172,13 @@ inline constexpr bool isWrenBuiltin_v =
   std::is_same_v<T, std::string_view> ||
   std::is_same_v<T, const char*>;
 
+// Helper for shared_ptr detection: shared_ptr returns hand out the pointee
+// with shared ownership instead of copying it.
+template <typename T> struct is_shared_ptr : std::false_type {};
+template <typename T> struct is_shared_ptr<std::shared_ptr<T>> : std::true_type {};
+template <typename T>
+inline constexpr bool is_shared_ptr_v = is_shared_ptr<std::decay_t<T>>::value;
+
 // ===========================================================================
 // Slot access helpers for foreign (wrapper-based) objects
 // ===========================================================================
@@ -181,7 +201,7 @@ inline std::shared_ptr<T> getForeignShared(WrenVM* vm, int slot) {
 
 // Generic argument getter — handles builtins, foreign by-value/ref/ptr.
 template <typename T>
-inline auto getArg(WrenVM* vm, int slot) {
+inline decltype(auto) getArg(WrenVM* vm, int slot) {
   using D = std::decay_t<T>;
   if constexpr (isWrenBuiltin_v<D>) {
     return Converter<D>::get(vm, slot);
@@ -195,14 +215,39 @@ inline auto getArg(WrenVM* vm, int slot) {
   }
 }
 
-// Place a foreign return value into slot 0, wrapping it in a ForeignWrapper.
+// A scratch slot guaranteed to be clear of the current call's arguments.
+inline int scratchSlot(WrenVM* vm) {
+  const int slots = wrenGetSlotCount(vm);
+  return slots < 8 ? 8 : slots;
+}
+
+// Fetch the Wren class registered for T (via Module::klass<T>) into a scratch
+// slot and start a new foreign object in slot 0. Returns the foreign data
+// pointer, ready for placement-new of a ForeignWrapper.
+template <typename T>
+inline void* newForeignInSlot0(WrenVM* vm) {
+  const int classSlot = scratchSlot(vm);
+  wrenEnsureSlots(vm, classSlot + 1);
+  wrenGetVariable(vm, ClassId<T>::moduleName.c_str(), ClassId<T>::className.c_str(), classSlot);
+  return wrenSetSlotNewForeign(vm, 0, classSlot, sizeof(ForeignWrapper));
+}
+
+// Place a return value into slot 0. Builtins use their converter; shared_ptr
+// returns share ownership of the pointee; other types are foreign values,
+// copied into a new ForeignWrapper. The Wren class needed for boxing is
+// looked up through the ClassId registry, because slot 0 holds the receiver
+// during instance method calls.
 template <typename T>
 inline void setReturn(WrenVM* vm, T&& value) {
   using D = std::decay_t<T>;
   if constexpr (isWrenBuiltin_v<D>) {
     Converter<D>::set(vm, 0, std::forward<T>(value));
+  } else if constexpr (is_shared_ptr_v<D>) {
+    using X = typename D::element_type;
+    void* data = newForeignInSlot0<X>(vm);
+    new (data) ForeignWrapper(ForeignWrapper::share<X>(std::forward<T>(value)));
   } else {
-    void* data = wrenSetSlotNewForeign(vm, 0, 0, sizeof(ForeignWrapper));
+    void* data = newForeignInSlot0<D>(vm);
     new (data) ForeignWrapper(ForeignWrapper::make<D>(std::forward<T>(value)));
   }
 }
@@ -226,7 +271,7 @@ void memberTrampoline(WrenVM* vm) {
   } else {
     // Unpack arguments: slot 0 = receiver, slots 1..N = args
     [&obj, vm]<std::size_t... Is>(std::index_sequence<Is...>) {
-      if constexpr (std::is_void_v<std::invoke_result_t<decltype(Fn), Class&, Args...>>) {
+      if constexpr (std::is_void_v<std::invoke_result_t<decltype(Fn), Class&, decltype(getArg<Args>(vm, 0))...>>) {
         (obj.*Fn)(getArg<Args>(vm, static_cast<int>(Is) + 1)...);
       } else {
         setReturn(vm, (obj.*Fn)(getArg<Args>(vm, static_cast<int>(Is) + 1)...));
@@ -246,7 +291,7 @@ void freeTrampoline(WrenVM* vm) {
     }
   } else {
     [vm]<std::size_t... Is>(std::index_sequence<Is...>) {
-      if constexpr (std::is_void_v<std::invoke_result_t<decltype(Fn), Args...>>) {
+      if constexpr (std::is_void_v<std::invoke_result_t<decltype(Fn), decltype(getArg<Args>(vm, 0))...>>) {
         Fn(getArg<Args>(vm, static_cast<int>(Is) + 1)...);
       } else {
         setReturn(vm, Fn(getArg<Args>(vm, static_cast<int>(Is) + 1)...));
@@ -319,7 +364,7 @@ void setterTrampoline(WrenVM* vm) {
       }
     } else {
       [&obj, vm]<std::size_t... Is>(std::index_sequence<Is...>) {
-        if constexpr (std::is_void_v<std::invoke_result_t<decltype(Fn), Class&, Args...>>) {
+        if constexpr (std::is_void_v<std::invoke_result_t<decltype(Fn), Class&, decltype(getArg<Args>(vm, 0))...>>) {
           Fn(obj, getArg<Args>(vm, static_cast<int>(Is) + 1)...);
         } else {
           setReturn(vm, Fn(obj, getArg<Args>(vm, static_cast<int>(Is) + 1)...));
@@ -689,6 +734,13 @@ private:
 
 template <typename T>
 Foreign<T>::~Foreign() {
+  // Record the module/class name for this type so return-value boxing
+  // (setReturn) can find the Wren class later. Skip moved-from objects,
+  // whose reg_ has already been transferred elsewhere.
+  if (!reg_.className.empty()) {
+    detail::ClassId<T>::moduleName = module_->name();
+    detail::ClassId<T>::className = reg_.className;
+  }
   module_->addClass(std::move(reg_));
 }
 
