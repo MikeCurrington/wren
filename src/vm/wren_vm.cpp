@@ -117,6 +117,9 @@ void wrenFreeVM(WrenVM* vm)
   // may try to use. Better to tell them about the bug early.
   ASSERT(vm->handles == nullptr, "All handles have not been released.");
 
+  // Likewise, all nested calls must have been ended before the VM is freed.
+  ASSERT(vm->callContexts == nullptr, "All nested calls have not been ended.");
+
   wrenSymbolTableClear(vm, &vm->methodNames);
 
   DEALLOCATE(vm, vm);
@@ -153,6 +156,17 @@ void wrenCollectGarbage(WrenVM* vm)
 
   // The current fiber.
   wrenGrayObj(vm, (Obj*)vm->fiber);
+
+  // Fibers that are suspended in foreign methods waiting for nested calls to
+  // complete. They are only reachable from the C stack, so the VM has to
+  // track them explicitly or they (and the values on their stacks) would be
+  // collected while the nested code runs.
+  for (WrenCallContext* context = vm->callContexts;
+       context != nullptr;
+       context = context->prev)
+  {
+    wrenGrayObj(vm, (Obj*)context->fiber);
+  }
 
   // The handles.
   for (WrenHandle* handle = vm->handles;
@@ -384,16 +398,34 @@ static void bindMethod(WrenVM* vm, int methodType, int symbol,
 static void callForeign(WrenVM* vm, ObjFiber* fiber,
                         WrenForeignMethodFn foreign, int numArgs)
 {
-  ASSERT(vm->apiStack == nullptr, "Cannot already be in foreign call.");
+  // Store the base of the API slot region as an index into the fiber's stack
+  // instead of a pointer. The foreign method may call back into Wren, and any
+  // of that nested code can grow (and reallocate) some fiber's stack. Since a
+  // fiber suspended in a foreign call can never be resumed, this fiber's stack
+  // cannot move, so the index is all that's needed to find the region again.
+  int apiStackBase = (int)(fiber->stackTop - fiber->stack) - numArgs;
+
   vm->apiStack = fiber->stackTop - numArgs;
 
   foreign(vm);
 
+  // If the foreign method called back into Wren using wrenBeginCall() but
+  // didn't end the nested call -- because it errored or simply forgot -- end
+  // any remaining ones now. Their slot regions belong to this fiber and are no
+  // longer meaningful once the foreign method has returned.
+  while (vm->callContexts != nullptr && vm->callContexts->fiber == fiber)
+  {
+    wrenEndCall(vm, vm->callContexts);
+  }
+
+  // Restore the VM's state. A nested call may have changed the current fiber
+  // or aborted the VM entirely.
+  vm->fiber = fiber;
+  vm->apiStack = nullptr;
+
   // Discard the stack slots for the arguments and temporaries but leave one
   // for the result.
-  fiber->stackTop = vm->apiStack + 1;
-
-  vm->apiStack = nullptr;
+  fiber->stackTop = fiber->stack + apiStackBase + 1;
 }
 
 // Handles the current fiber having aborted because of an error.
@@ -670,11 +702,19 @@ static void createForeign(WrenVM* vm, ObjFiber* fiber, Value* stack)
   ASSERT(method->type == METHOD_FOREIGN, "Allocator should be foreign.");
 
   // Pass the constructor arguments to the allocator as well.
-  ASSERT(vm->apiStack == nullptr, "Cannot already be in foreign call.");
   vm->apiStack = stack;
 
   method->as.foreign(vm);
 
+  // End any nested calls the allocator left open, and put this fiber back in
+  // charge, since a nested call may have changed the current fiber. A fiber
+  // suspended in a foreign call can never be resumed, so its stack cannot have
+  // moved, meaning [stack] is still valid.
+  while (vm->callContexts != nullptr && vm->callContexts->fiber == fiber)
+  {
+    wrenEndCall(vm, vm->callContexts);
+  }
+  vm->fiber = fiber;
   vm->apiStack = nullptr;
 }
 
@@ -1479,9 +1519,7 @@ WrenInterpretResult wrenCall(WrenVM* vm, WrenHandle* method)
          "Stack must have enough arguments for method.");
   
   // Clear the API stack. Now that wrenCall() has control, we no longer need
-  // it. We use this being non-null to tell if re-entrant calls to foreign
-  // methods are happening, so it's important to clear it out now so that you
-  // can call foreign methods from within calls to wrenCall().
+  // it. All that matters is that the one return value is available at the end.
   vm->apiStack = nullptr;
 
   // Discard any extra temporary slots. We take for granted that the stub
@@ -1496,6 +1534,55 @@ WrenInterpretResult wrenCall(WrenVM* vm, WrenHandle* method)
   if (vm->fiber != nullptr) vm->apiStack = vm->fiber->stack;
   
   return result;
+}
+
+WrenCallContext* wrenBeginCall(WrenVM* vm)
+{
+  ASSERT(vm->apiStack != nullptr,
+         "Must be in a foreign method (or have set up slots) to begin a call.");
+
+  // Remember the current slot region so that it can be restored when the
+  // nested call is done. The base is stored as an index into the fiber's
+  // stack because the nested code may reallocate and move the stack of any
+  // other fiber -- and because this fiber is blocked in the foreign method
+  // for the duration, this is the only chance we have to record it.
+  WrenCallContext* context = ALLOCATE(vm, WrenCallContext);
+  context->fiber = vm->fiber;
+  context->apiStackBase = (int)(vm->apiStack - vm->fiber->stack);
+  context->prev = vm->callContexts;
+  vm->callContexts = context;
+
+  // Create a fresh fiber to run the nested call in. Giving each nested call
+  // its own fiber ensures that a Wren stack only ever has a single foreign
+  // API call at the top of it, and means the nested call's slots start empty
+  // at the bottom of the fiber's stack, just like a non-nested one.
+  //
+  // The context links the suspended fiber into the VM so that the garbage
+  // collector can find it and so that Wren code can detect that it can't be
+  // resumed while the foreign method is still running.
+  ObjFiber* fiber = wrenConstruct<ObjFiber>(vm, 0, nullptr);
+  vm->fiber = fiber;
+  vm->apiStack = fiber->stack;
+
+  return context;
+}
+
+void wrenEndCall(WrenVM* vm, WrenCallContext* context)
+{
+  ASSERT(context != nullptr, "Context cannot be NULL.");
+  ASSERT(vm->callContexts == context,
+         "Must end nested calls in the reverse order they were begun.");
+
+  // Unlink the context from the stack of nested calls.
+  vm->callContexts = context->prev;
+
+  // Restore the suspended fiber and its slot region. Since the fiber could
+  // not be resumed while it was suspended in the foreign method, its stack
+  // cannot have moved, so the saved base index still points to the same slot.
+  vm->fiber = context->fiber;
+  vm->apiStack = context->fiber->stack + context->apiStackBase;
+
+  DEALLOCATE(vm, context);
 }
 
 WrenHandle* wrenMakeHandle(WrenVM* vm, Value value)
@@ -1545,9 +1632,20 @@ WrenInterpretResult wrenInterpret(WrenVM* vm, const char* module,
   wrenPushRoot(vm, (Obj*)closure);
   ObjFiber* fiber = wrenConstruct<ObjFiber>(vm, 0, closure);
   wrenPopRoot(vm); // closure.
+
+  // If this is a re-entrant call from inside a foreign method, suspend the
+  // foreign method's slots for the duration. wrenInterpret() doesn't use the
+  // API slots itself, but suspending them keeps the foreign method's fiber
+  // alive and prevents Wren code from resuming it while the source runs.
+  WrenCallContext* context =
+      vm->apiStack != nullptr ? wrenBeginCall(vm) : nullptr;
   vm->apiStack = nullptr;
 
-  return runInterpreter(vm, fiber);
+  WrenInterpretResult result = runInterpreter(vm, fiber);
+
+  if (context != nullptr) wrenEndCall(vm, context);
+
+  return result;
 }
 
 ObjClosure* wrenCompileSource(WrenVM* vm, const char* module, const char* source,

@@ -10,6 +10,7 @@
 #include "benchmark.h"
 #include "call.h"
 #include "call_calls_foreign.h"
+#include "call_nested.h"
 #include "call_wren_call_root.h"
 #include "error.h"
 #include "fiber_exit.h"

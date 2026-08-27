@@ -1,3 +1,12 @@
+# Re-entrancy
+
+This note describes how the VM supports calling out from Wren to C (foreign
+methods and constructors) and then calling back into Wren from that C code,
+recursively, without breaking fibers.
+
+All of the scenarios below are implemented and tested in
+`test/api/call_nested.wren`.
+
 ## wrenInterpret()
 
 You can already call out to a foreign method or constructor from within an
@@ -15,130 +24,94 @@ fiber's stack. There must be, because that's where the arguments to the foreign
 method are.
 
 So, if you `wrenCall()`, which eventually calls a foreign method, the same fiber
-will be used for the API twice. This is currently broken. The reason it's broken
-is that `callForeign()` and `createForeign()` store the old apiStack pointer
-(the one used for the initial `wrenCall()`) in a local variable and then restore
-it when the foreign call completes. If a GC or stack grow occurs in the middle
-of that, we end up restoring a bad pointer.
-
-But I don't think we need to preserve apiStack for the `wrenCall()` anyway. As
-soon as the user calls `wrenCall()` and it starts running, we no longer need to
-track the number of slots allocated for the API. All that matters is that the
-one return value is available at the end.
-
-I think this means it *should* be fairly easy to support:
-
-    wrenCall() -> wren code -> foreign method
+will be used for the API twice. This works because `wrenCall()` clears
+`vm->apiStack` as soon as it takes control, and `callForeign()` and
+`createForeign()` save and restore the slot region themselves.
 
 ## Foreign calls
 
 The interesting one is whether you can call `wrenInterpret()` or `wrenCall()`
-from within a foreign method. If we're going to allow re-entrancy at all, it
-would be nice to completely support it. I do think there are practical uses
-for this.
+from within a foreign method.
 
-Calling `wrenInterpret()` should already work, though I don't think it's tested.
+Calling `wrenInterpret()` works directly.
 
-Calling `wrenCall()` is probably broken. It will try to re-use the slots that
-are already set up for the foreign call and then who knows what happens if you
-start to execute.
+Calling `wrenCall()` requires a new set of API slots, because the slots that
+are current inside a foreign method are the foreign method's own arguments.
+The solution is a pair of functions:
 
-I think a key part of the problem is that we implicitly create or reuse the API
-stack as soon as you start messing with slots. So if there already happens to
-be an API stack -- because you're in the middle of a foreign method -- it will
-incorrectly reuse it when you start preparing for the `wrenCall()`.
+    WrenCallContext* wrenBeginCall(WrenVM* vm);
+    void wrenEndCall(WrenVM* vm, WrenCallContext* context);
 
-An obvious fix is to add a new function like `wrenPrepareCall()` that explicitly
-creates a new API stack -- really a new fiber -- for you to use. We still have
-to figure out how to keep track of the current API stack and fiber for the
-foreign call so that we can return to it.
+`wrenBeginCall()` hides the current slots and creates a fresh fiber whose
+stack forms a new, empty slot region. The host sets up the receiver and
+arguments in those slots and calls `wrenCall()` as usual. When it's done, it
+calls `wrenEndCall()`, which restores the previous (outer) slot region so the
+foreign method can still read its arguments and write its return value.
 
-**TODO: more thinking here...**
+The saved region is described by an *index* into the outer fiber's stack, not
+a pointer, because stacks can be reallocated (and move) while nested code
+runs. However, a fiber that is suspended in a foreign call can never be
+resumed (see below), which means its stack can never grow while it is
+suspended, which means the index remains valid.
 
-If I can figure this out, it means we can do:
-
-    foreign method -> C code -> wrenCall()
+The set of open contexts is tracked in `vm->callContexts`, a stack that
+parallels the C call stack. If a foreign method returns without ending its
+nested calls (an error, or simply a bug), `callForeign()` and `createForeign()`
+clean them up.
 
 ## Nested foreign calls
 
-If we compose the above it leads to the question of whether you can have
-multiple nested foreign calls in-progress at the same time. Can you have a C
-stack like:
+Since each `wrenBeginCall()` creates a new fiber, you can nest arbitrarily:
 
     wrenCall()
     runInterpreter()
-    foreignCall()
+    callForeign()
+    wrenBeginCall()
     wrenCall()
     runInterpreter()
-    foreignCall()
+    callForeign()
     ...
 
-This does *not* mean there is a single Wren stack that contains multiple
-foreign calls. Since each `wrenCall()` begins a new fiber, any given Wren stack
-can only ever have a single foreign API call at the top of the stack. I think
-that's a good invariant.
+This preserves the invariant that any given Wren stack only ever has a single
+foreign API call at the top of it.
 
-I believe we should support the above. This means that the core
-`runInterpreter()` C function is itself re-entrant. So far, I've always assumed
-it would not be, so it probably breaks some assumptions. I'll have to think
-through. The main thing that could be problematic is the local variables inside
-`runInterpreter()`, but I believe `STORE_FRAME()` and `LOAD_FRAME()` take care
-of those. We just need to make sure they get called before any re-entrancy can
-happen. That probably means calling them before we invoke a foreign method.
+The core `runInterpreter()` C function is itself re-entrant. Its cached state
+(the current call frame, stack pointer, and instruction pointer) is stored
+back into the fiber's frames with `STORE_FRAME()` before any code that can
+re-enter the VM (foreign calls, in particular) and refreshed with
+`LOAD_FRAME()` afterwards.
 
-I'll have to write some tests and see what blows up for this.
+The garbage collector treats every fiber named by an open context as a root.
+Those fibers are only reachable from the C stack, so without this they (and
+all of the values on their stacks) would be collected while the nested code
+runs.
 
 ## Calling re-entrant fibers
 
-Where it gets really confusing is how re-entrant calls interact with fibers.
-For example, say you:
+If Wren code gets a reference to a fiber that is suspended in a foreign call
+(for example, by storing `Fiber.current` in a variable before the foreign call
+and passing it into the nested code), calling or transferring to that fiber
+would be catastrophic: it would run on a second interpreter while the first is
+still waiting for the foreign method to return, and when it finished, the two
+interpreters would unwind through each other.
 
-    wrenCall()       -> creates Fiber #1
-    runInterpreter() -> runs Fiber #1
-                        some Wren code stores current fiber in a variable
-    foreignCall()
-    wrenCall()       -> creates Fiber #2
-    runInterpreter() -> runs Fiber #2
-                        some Wren code calls or transfers to Fiber #1
+To prevent this, `runFiber()` rejects calling or transferring to any fiber
+named by an open context with a runtime error:
 
-What happens in this scenario? We definitely want to prevent it. We already
-detect and prevent the case where you call a fiber that's already called in the
-current *Wren* stack, so we should be able to do something in the above case
-too.
+    Cannot call a fiber suspended in a foreign call.
+    Cannot transfer to a fiber suspended in a foreign call.
 
-Now that I think about it, you can probably already get yourself in a weird
-state if you grab the root fiber and call it. Yeah, I justed tested. This:
-
-    var root = Fiber.current
-    Fiber.new {
-      root.call()
-      System.print(1)
-    }.call()
-    System.print(2)
-
-Segfaults the VM. :( It actually dies when the called child fiber *returns*. The
-root call successfully continues executing the root fiber (which is super
-weird). Then that completes and control returns to the spawned fiber. Then
-*that* completes and tries to return control to the root fiber, but the root is
-already done, and it blows up. So the above prints "2" then "1" then dies.
-
-(If either of the `call()` calls are change to `transfer()`, the script runs
-without any problems because then it never tries to unwind back through the
-root fiber which already completed.)
-
-To fix this, when `runInterpreter()` begins executing a root fiber (either from
-`wrenCall()` or `wrenInterpret()`), we need to mark it in some way so that it
-can't be called or transferred to.
+(The pre-existing check that you cannot call the root fiber remains for the
+ordinary, non-re-entrant case.)
 
 ## Suspending during re-entrancy
 
-Maybe the weird conceptual case is when you suspend a fiber while there are
-multiple re-entrant calls to `runInterpreter()` on the C stack. Ideall, they
-would all magically return, but that's obviously not feasible.
+If the nested code suspends its fiber (using `Fiber.yield()` with no caller,
+or by any other means), only the innermost interpreter stops. The nested
+`wrenCall()` reports success, but there is no return value, and the suspended
+fiber is no longer reachable from the VM, so it's up to the host to manage it.
+In practice, hosts that need suspension should use their own fibers explicitly
+rather than suspending nested calls.
 
-I guess what will/should happen is that just the innermost one suspends. It's
-up to the host to handle that fact. I need to think about this more, add some
-tests, and work through it.
-
-I think we'll probably want to add another WrenInterpretResult case for
-suspension so that the host can tell that's what happened.
+A future API change may add a `WREN_RESULT_SUSPEND` case to
+`WrenInterpretResult` so hosts can distinguish suspension from completion.

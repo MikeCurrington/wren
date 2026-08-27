@@ -43,6 +43,10 @@ typedef struct WrenVM WrenVM;
 // garbage collector will not reclaim the object it references.
 typedef struct WrenHandle WrenHandle;
 
+// A saved region of API slots, used to re-enter the VM from within a foreign
+// method. See wrenBeginCall() below.
+typedef struct WrenCallContext WrenCallContext;
+
 // A generic allocation function that handles all explicit memory management
 // used by Wren. It's used like so:
 //
@@ -352,6 +356,69 @@ WREN_API WrenInterpretResult wrenCall(WrenVM* vm, WrenHandle* method);
 // Releases the reference stored in [handle]. After calling this, [handle] can
 // no longer be used.
 WREN_API void wrenReleaseHandle(WrenVM* vm, WrenHandle* handle);
+
+// The following functions make it possible to call from C back into Wren from
+// inside a foreign method, recursively. This is called being "re-entrant".
+//
+// Inside a foreign method, the API slots (wrenGetSlot*(), wrenSetSlot*(),
+// wrenEnsureSlots(), and wrenCall()) all refer to the slots holding that
+// foreign method's arguments and return value. In order to invoke Wren code
+// from C using wrenCall(), you first need to set up the receiver and arguments
+// in slots, but writing to those slots would overwrite the foreign method's
+// own arguments.
+//
+// To solve that, before setting up the call, invoke wrenBeginCall(). This
+// hides the foreign method's slots and gives you a fresh, empty set of slots to
+// prepare the nested call with. Invoke wrenCall() as usual, read its result,
+// and then call wrenEndCall() with the context returned by wrenBeginCall().
+// That restores the foreign method's own slots so its arguments can still be
+// read and its return value written.
+//
+// A typical foreign method that calls back into Wren looks like:
+//
+//     void someForeignMethod(WrenVM* vm)
+//     {
+//       double incoming = wrenGetSlotDouble(vm, 1);
+//
+//       WrenCallContext* context = wrenBeginCall(vm);
+//       wrenEnsureSlots(vm, 2);
+//       wrenSetSlotHandle(vm, 0, someClass);
+//       wrenSetSlotDouble(vm, 1, incoming);
+//       WrenInterpretResult result = wrenCall(vm, someMethod);
+//       // ... check result ...
+//       double nested = wrenGetSlotDouble(vm, 0);
+//       wrenEndCall(vm, context);
+//
+//       wrenSetSlotDouble(vm, 0, nested);
+//     }
+//
+// wrenInterpret() may also be called from within a foreign method and does not
+// require wrenBeginCall() since it does not use the API slots.
+//
+// While inside a nested call, any fiber that is suspended waiting for a foreign
+// method to return -- in other words, the fibers whose slots were hidden by
+// wrenBeginCall() -- can no longer be resumed by calling or transferring to
+// them from Wren. Attempting to do so is a runtime error. This is necessary
+// because those fibers' state is only meaningful to the C code that is waiting
+// on them.
+
+// Begins a nested API call context. Must be called from within a foreign
+// method, before setting up the slots for a re-entrant wrenCall().
+//
+// Hides the current slots (the foreign method's arguments) and gives the
+// caller a fresh, empty set of slots at slot 0. The previous slots are restored
+// by the matching call to wrenEndCall().
+//
+// Returns the context that must be passed to wrenEndCall().
+WREN_API WrenCallContext* wrenBeginCall(WrenVM* vm);
+
+// Ends the innermost nested API call context, which must be [context], as
+// returned by the matching wrenBeginCall().
+//
+// Restores the slots that were current when wrenBeginCall() was called, so the
+// foreign method's arguments are visible again and its return value can be
+// written.
+WREN_API void wrenEndCall(WrenVM* vm, WrenCallContext* context);
 
 // The following functions are intended to be called from foreign methods or
 // finalizers. The interface Wren provides to a foreign method is like a

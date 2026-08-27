@@ -25,6 +25,9 @@ WrenForeignMethodFn APITest_bindForeignMethod(
   method = callCallsForeignBindMethod(fullName);
   if (method != NULL) return method;
 
+  method = callNestedBindMethod(fullName);
+  if (method != NULL) return method;
+
   method = errorBindMethod(fullName);
   if (method != NULL) return method;
 
@@ -73,6 +76,9 @@ WrenForeignClassMethods APITest_bindForeignClass(
   foreignClassBindClass(className, &methods);
   if (methods.allocate != NULL) return methods;
 
+  callNestedBindClass(className, &methods);
+  if (methods.allocate != NULL) return methods;
+
   foreignStackMoveBindClass(className, &methods);
   if (methods.allocate != NULL) return methods;
 
@@ -98,6 +104,10 @@ int APITest_Run(WrenVM* vm, const char* inTestName)
   else if (strstr(inTestName, "/call_calls_foreign.wren") != NULL)
   {
     return callCallsForeignRunTests(vm);
+  }
+  else if (strstr(inTestName, "/call_nested.wren") != NULL)
+  {
+    return callNestedRunTests(vm);
   }
   else if (strstr(inTestName, "/call_wren_call_root.wren") != NULL)
   {

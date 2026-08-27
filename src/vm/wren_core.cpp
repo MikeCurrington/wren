@@ -92,6 +92,20 @@ static bool runFiber(WrenVM* vm, ObjFiber* fiber, Value* args, bool isCall,
     RETURN_ERROR_FMT("Cannot $ an aborted fiber.", verb);
   }
 
+  // A fiber that is suspended in a foreign method waiting for a re-entrant
+  // call to complete can't be resumed. Its stack is in use by the C code that
+  // called the foreign method, so its state is only meaningful to that code.
+  // Resuming it would unwind two interpreters at once, so prevent it.
+  for (WrenCallContext* context = vm->callContexts;
+       context != nullptr;
+       context = context->prev)
+  {
+    if (context->fiber == fiber)
+    {
+      RETURN_ERROR_FMT("Cannot $ a fiber suspended in a foreign call.", verb);
+    }
+  }
+
   if (isCall)
   {
     // You can't call a called fiber, but you can transfer directly to it,

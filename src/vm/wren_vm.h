@@ -28,6 +28,27 @@ struct WrenHandle
   WrenHandle* next;
 };
 
+// A saved API slot region, used to call back into Wren from inside a foreign
+// method. Created by wrenBeginCall() and destroyed by wrenEndCall().
+//
+// The base of the saved slot region is stored as an index into the fiber's
+// stack rather than a pointer because the stack can be reallocated (moving)
+// while the nested code runs.
+struct WrenCallContext
+{
+  // The fiber whose slot region was current when wrenBeginCall() was called.
+  // This is the fiber that is suspended in the foreign method. It is kept
+  // alive (and its stack scanned) by the GC while the nested code runs.
+  ObjFiber* fiber;
+
+  // The index of the base of the saved slot region in fiber->stack.
+  int apiStackBase;
+
+  // The next outer context, or NULL if this is the outermost one. The contexts
+  // form a stack that parallels the C call stack.
+  WrenCallContext* prev;
+};
+
 struct WrenVM
 {
   ObjClass* boolClass;
@@ -98,6 +119,14 @@ struct WrenVM
   // slots by calling wrenEnsureSlots(), a stack is created and this is
   // initialized.
   Value* apiStack;
+
+  // The stack of nested API call contexts created by wrenBeginCall(). The head
+  // is the innermost context. Each context's fiber is a fiber that is suspended
+  // waiting for a foreign method to return, so they are all GC roots and may
+  // not be resumed from Wren while they are in this list.
+  //
+  // This is NULL when there are no nested calls, which is the common case.
+  WrenCallContext* callContexts;
 
   WrenConfiguration config;
   
