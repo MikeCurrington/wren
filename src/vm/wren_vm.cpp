@@ -928,6 +928,22 @@ static WrenInterpretResult runInterpreter(WrenVM* vm, ObjFiber* fiber)
     #define DEBUG_TRACE_INSTRUCTIONS() do { } while (false)
   #endif
 
+  // Gives the debug hook (if one is installed) a chance to inspect the current
+  // source line before the instruction at [ip] executes. Follows the same
+  // discipline as a foreign method call: store the cached frame state first,
+  // then run the hook -- during which API slots are wired up and a GC may
+  // occur -- then refresh the cached state afterwards.
+  #define DEBUG_HOOK()                                                         \
+      do                                                                       \
+      {                                                                        \
+        if (vm->debugHook != nullptr)                                          \
+        {                                                                      \
+          STORE_FRAME();                                                       \
+          wrenVmDebugHook(vm, fiber, frame);                                   \
+          LOAD_FRAME();                                                        \
+        }                                                                      \
+      } while (false)
+
   #if WREN_COMPUTED_GOTO
 
   static void* dispatchTable[] = {
@@ -943,6 +959,7 @@ static WrenInterpretResult runInterpreter(WrenVM* vm, ObjFiber* fiber)
       do                                                                       \
       {                                                                        \
         DEBUG_TRACE_INSTRUCTIONS();                                            \
+        DEBUG_HOOK();                                                          \
         goto *dispatchTable[instruction = (Code)READ_BYTE()];                  \
       } while (false)
 
@@ -951,6 +968,7 @@ static WrenInterpretResult runInterpreter(WrenVM* vm, ObjFiber* fiber)
   #define INTERPRET_LOOP                                                       \
       loop:                                                                    \
         DEBUG_TRACE_INSTRUCTIONS();                                            \
+        DEBUG_HOOK();                                                          \
         switch (instruction = (Code)READ_BYTE())
 
   #define CASE_CODE(name)  case CODE_##name

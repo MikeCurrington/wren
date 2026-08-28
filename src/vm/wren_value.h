@@ -351,6 +351,13 @@ struct CallFrame
   // the receiver, followed by the function's parameters, then local variables
   // and temporaries.
   Value* stackStart;
+
+  // The line and bytecode offset of the last debug hook line event in this
+  // frame, or -1 if the frame hasn't reported one yet. Used to detect line
+  // changes (and backward jumps to the same line) without firing the hook on
+  // every instruction.
+  int debugLastLine;
+  int debugLastOffset;
 };
 
 // Tracks how this fiber has been invoked, aside from the ways that can be
@@ -718,6 +725,8 @@ static inline void wrenAppendCallFrame(WrenVM* vm, ObjFiber* fiber,
   frame->stackStart = stackStart;
   frame->closure = closure;
   frame->ip = closure->fn->code.data;
+  frame->debugLastLine = -1;
+  frame->debugLastOffset = -1;
 }
 
 // Ensures [fiber]'s stack has at least [needed] slots.

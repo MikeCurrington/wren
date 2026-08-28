@@ -285,6 +285,45 @@ typedef enum
   WREN_RESULT_RUNTIME_ERROR
 } WrenInterpretResult;
 
+// The following declarations support source-level debugging of Wren scripts.
+
+// The reason a debug hook was invoked.
+typedef enum
+{
+  // The VM is about to execute the first instruction of a source line in the
+  // innermost call frame. This includes looping back to an earlier line, so
+  // the hook is invoked each time a loop body begins again.
+  WREN_DEBUG_LINE
+} WrenDebugEvent;
+
+// The source location and function of one call frame, as reported to the debug
+// hook.
+typedef struct
+{
+  // The resolved name of the module containing the executing function, or "?"
+  // if the frame has no module.
+  const char* module;
+
+  // The name of the executing function or method, or "?" if anonymous.
+  const char* function;
+
+  // The source line the frame is about to execute.
+  int line;
+} WrenDebugFrameInfo;
+
+// A function invoked by the VM when an interesting debug event occurs.
+//
+// The hook is always called on the thread running the VM, from inside the
+// interpreter loop. While the hook runs, the VM is suspended: the hook may
+// inspect paused state using the wrenDebug*() functions and the standard slot
+// API (wrenEnsureSlots(), wrenGetSlotDouble(), etc.). It may block for as long
+// as it likes, which is how a debugger pauses execution.
+//
+// The hook must not call wrenInterpret() or wrenCall() in this version of the
+// API. When the hook returns, execution resumes.
+typedef void (*WrenDebugHookFn)(WrenVM* vm, WrenDebugEvent event,
+                                void* userData);
+
 // The type of an object stored in a slot.
 //
 // This is not necessarily the object's *class*, but instead its low level
@@ -620,6 +659,52 @@ WREN_API void* wrenGetUserData(WrenVM* vm);
 
 // Sets user data associated with the WrenVM.
 WREN_API void wrenSetUserData(WrenVM* vm, void* userData);
+
+// The following functions install and query a source-level debugger hook.
+//
+// The inspection functions below may only be called from within the debug
+// hook (or from a foreign method), since they read the state of the currently
+// executing fiber. Frames are numbered from the innermost (most recently
+// called) frame, which is frame 0.
+
+// Installs [fn] as the VM's debug hook, passing [userData] to it. Passing NULL
+// for [fn] removes the current hook. There is at most one hook per VM.
+WREN_API void wrenSetDebugHook(WrenVM* vm, WrenDebugHookFn fn, void* userData);
+
+// Returns the number of call frames on the current fiber's call stack. The
+// innermost frame is index 0.
+WREN_API int wrenDebugGetFrameCount(WrenVM* vm);
+
+// Fills [info] with the module, function, and line of call frame [frame].
+// Returns false if [frame] is out of range.
+WREN_API bool wrenDebugGetFrameInfo(WrenVM* vm, int frame,
+                                    WrenDebugFrameInfo* info);
+
+// Returns the number of stack slots used by call frame [frame]. This includes
+// the receiver, parameters, local variables, and any temporaries the function
+// currently has on the stack. Local variable *names* are not retained at
+// runtime, so slots are identified by position only.
+WREN_API int wrenDebugGetLocalCount(WrenVM* vm, int frame);
+
+// Copies the value of local slot [index] of call frame [frame] into [slot].
+// It is an error if [frame] or [index] is out of range, or if [slot] is not
+// within the currently available API slots.
+WREN_API void wrenDebugGetLocal(WrenVM* vm, int frame, int index, int slot);
+
+// Returns the number of module-level variables defined by the module that
+// contains the function executing in call frame [frame].
+WREN_API int wrenDebugGetModuleVariableCount(WrenVM* vm, int frame);
+
+// Returns the name of module-level variable [index] for the module of call
+// frame [frame]. The returned string is owned by the VM and remains valid
+// while the VM is paused in the hook.
+WREN_API const char* wrenDebugGetModuleVariableName(WrenVM* vm, int frame,
+                                                    int index);
+
+// Copies the value of module-level variable [index] of the module of call
+// frame [frame] into [slot].
+WREN_API void wrenDebugGetModuleVariable(WrenVM* vm, int frame, int index,
+                                         int slot);
 
 #ifdef __cplusplus
 } // extern "C"

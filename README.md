@@ -44,6 +44,11 @@ If you like the sound of this, [let's get started][started]. You can even try
 it [in your browser][browser]! Excited? Well, come on and [get
 involved][contribute]!
 
+This fork also ships a source-level debugger: Wren scripts — including those
+running inside an embedding application — can be debugged from VS Code
+(breakpoints, stepping, call stack, variables) over the Debug Adapter
+Protocol. See [doc/debugger.md](doc/debugger.md).
+
 [![Build Status](https://travis-ci.org/wren-lang/wren.svg?branch=main)](https://travis-ci.org/wren-lang/wren)
 
 [syntax]: http://wren.io/syntax.html

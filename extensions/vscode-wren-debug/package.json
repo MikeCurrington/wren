@@ -1,0 +1,69 @@
+{
+  "name": "vscode-wren-debug",
+  "displayName": "Wren Debug",
+  "description": "Debug Wren scripts in VS Code via the Debug Adapter Protocol",
+  "version": "0.1.0",
+  "publisher": "wren",
+  "engines": {
+    "vscode": "^1.60.0"
+  },
+  "categories": [
+    "Debuggers"
+  ],
+  "contributes": {
+    "breakpoints": [
+      {
+        "language": "wren"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "wren",
+        "label": "Wren Debug",
+        "languages": [
+          "wren"
+        ],
+        "configurationAttributes": {
+          "attach": {
+            "properties": {
+              "port": {
+                "type": "number",
+                "description": "The DAP port the host application is listening on",
+                "default": 4711
+              },
+              "host": {
+                "type": "string",
+                "description": "The host the debuggee is running on",
+                "default": "127.0.0.1"
+              },
+              "stopOnEntry": {
+                "type": "boolean",
+                "description": "Stop the script on its first line of code",
+                "default": false
+              }
+            },
+            "required": [
+              "port"
+            ]
+          }
+        },
+        "configurationSnippets": [
+          {
+            "label": "Wren: Attach to a running host",
+            "description": "Attach VS Code's debugger to a Wren VM that is serving DAP on a local port",
+            "body": {
+              "type": "wren",
+              "request": "attach",
+              "name": "Attach to Wren VM",
+              "port": 4711
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "main": "./extension.js",
+  "activationEvents": [
+    "onDebug"
+  ]
+}

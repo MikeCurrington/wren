@@ -12,6 +12,7 @@ option(WREN_RANDOM "Wren Random Class" ON)
 option(WREN_BUILD_STATIC "Wren Static Library" ON)
 option(WREN_BUILD_SHARED "Wren Shared Library" ON)
 option(WREN_BUILD_TEST "Build Wren Tests" OFF)
+option(WREN_DEBUGGER "Wren Debug Adapter Protocol debugger" ON)
 
 # Build tests by default if compiling in the root.
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
@@ -53,6 +54,28 @@ if (WREN_BUILD_SHARED)
     add_library(wren_shared SHARED ${WREN_SRC_FILES})
     target_include_directories(wren_shared PUBLIC ${WREN_INCLUDE_DIRS})
     target_compile_definitions(wren_shared PUBLIC ${WREN_DEFINES})
+endif()
+
+# DAP debugger library (optional; hosts link this to make their scripts
+# debuggable from VS Code or any other Debug Adapter Protocol client)
+if (WREN_DEBUGGER AND WREN_BUILD_STATIC)
+    file(GLOB WREN_SRC_DEBUGGER_FILES ${WREN_SRC}/debugger/*.cpp)
+    add_library(wren_debugger STATIC ${WREN_SRC_DEBUGGER_FILES})
+    target_include_directories(wren_debugger PUBLIC
+        ${WREN_SRC}/debugger
+        ${WREN_SRC}/include
+        ${WREN_SRC}/vm
+    )
+    target_compile_definitions(wren_debugger PUBLIC ${WREN_DEFINES})
+    target_compile_features(wren_debugger PUBLIC cxx_std_20)
+    target_link_libraries(wren_debugger PUBLIC wren)
+
+    if (WREN_BUILD_TEST)
+        # A tiny standalone host so the debugger can be exercised without an
+        # embedding application.
+        add_executable(wren_debug_example ${WREN_SRC}/../example/debugger/main.cpp)
+        target_link_libraries(wren_debug_example PUBLIC wren_debugger)
+    endif()
 endif()
 
 # Testing

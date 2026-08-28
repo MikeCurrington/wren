@@ -9,6 +9,12 @@
 // Used when a fiber throws a runtime error which is not caught.
 void wrenDebugPrintStackTrace(WrenVM* vm);
 
+// Invokes the VM's debug hook (if installed) for the source line [frame] is
+// about to execute. Called from the interpreter loop with the cached frame
+// state already stored back into [frame]. Fires only on line transitions, not
+// for every instruction. See also the debug API declarations in wren.h.
+void wrenVmDebugHook(WrenVM* vm, ObjFiber* fiber, CallFrame* frame);
+
 // The "dump" functions are used for debugging Wren itself. Normal code paths
 // will not call them unless one of the various DEBUG_ flags is enabled.
 

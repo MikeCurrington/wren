@@ -12,6 +12,7 @@
 #include "call_calls_foreign.h"
 #include "call_nested.h"
 #include "call_wren_call_root.h"
+#include "debug_hook.h"
 #include "error.h"
 #include "fiber_exit.h"
 #include "get_variable.h"

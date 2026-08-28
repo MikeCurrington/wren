@@ -386,3 +386,172 @@ void wrenDumpStack(ObjFiber* fiber)
   }
   printf("\n");
 }
+
+// ---------------------------------------------------------------------------
+// Debug hook support
+// ---------------------------------------------------------------------------
+
+// Called from the interpreter loop's DISPATCH() macro when a debug hook is
+// installed, with the interpreter's cached frame state already stored back
+// into [frame].
+//
+// Fires the hook once per line transition (including backward jumps to an
+// earlier instruction on the same line, so one-line loop bodies still report)
+// rather than on every instruction.
+//
+// While the user hook runs, the API slots are wired to the top of the fiber's
+// stack so that the hook can inspect the paused state through the standard
+// slot API, exactly like a foreign method can. They are unhooked on return.
+void wrenVmDebugHook(WrenVM* vm, ObjFiber* fiber, CallFrame* frame)
+{
+  ObjFn* fn = frame->closure->fn;
+  if (fn->debug == nullptr) return;
+
+  int offset = (int)(frame->ip - fn->code.data);
+  if (offset < 0 || offset >= fn->code.count) return;
+
+  int line = fn->debug->sourceLines.data[offset];
+
+  if (line == frame->debugLastLine && offset >= frame->debugLastOffset) return;
+  frame->debugLastLine = line;
+  frame->debugLastOffset = offset;
+
+  int apiStackBase = (int)(fiber->stackTop - fiber->stack);
+  vm->apiStack = fiber->stackTop;
+  vm->debugSavedStackTop = fiber->stackTop;
+
+  vm->debugHook(vm, WREN_DEBUG_LINE, vm->debugHookData);
+
+  vm->debugSavedStackTop = nullptr;
+  vm->apiStack = nullptr;
+  fiber->stackTop = fiber->stack + apiStackBase;
+}
+
+void wrenSetDebugHook(WrenVM* vm, WrenDebugHookFn fn, void* userData)
+{
+  vm->debugHook = fn;
+  vm->debugHookData = userData;
+}
+
+// Returns the call frame numbered the way the public debug API exposes frames:
+// innermost frame is 0. Returns NULL if [index] is out of range.
+static CallFrame* debugGetFrame(WrenVM* vm, int index)
+{
+  if (vm->fiber == nullptr) return nullptr;
+  if (index < 0 || index >= vm->fiber->numFrames) return nullptr;
+  return &vm->fiber->frames[vm->fiber->numFrames - 1 - index];
+}
+
+int wrenDebugGetFrameCount(WrenVM* vm)
+{
+  if (vm->fiber == nullptr) return 0;
+  return vm->fiber->numFrames;
+}
+
+bool wrenDebugGetFrameInfo(WrenVM* vm, int frame, WrenDebugFrameInfo* info)
+{
+  CallFrame* callFrame = debugGetFrame(vm, frame);
+  if (callFrame == nullptr || info == nullptr) return false;
+
+  ObjFn* fn = callFrame->closure->fn;
+
+  info->module = "?";
+  info->function = "?";
+  info->line = 0;
+
+  // Stub functions for calling methods from the C API have no module, and the
+  // core module's functions have no module name.
+  if (fn->module != nullptr && fn->module->name != nullptr)
+  {
+    info->module = fn->module->name->value;
+  }
+
+  if (fn->debug != nullptr)
+  {
+    if (fn->debug->name != nullptr) info->function = fn->debug->name;
+
+    int offset = (int)(callFrame->ip - fn->code.data);
+    if (offset >= 0 && offset < fn->debug->sourceLines.count)
+    {
+      info->line = fn->debug->sourceLines.data[offset];
+    }
+  }
+
+  return true;
+}
+
+// Returns a pointer one past the last stack slot used by the frame at
+// [frameIndex] (which indexes from the bottom of the call stack, unlike the
+// public API).
+static Value* debugFrameLocalEnd(WrenVM* vm, ObjFiber* fiber, int frameIndex)
+{
+  // The innermost frame's slots end at the stack top -- except while the
+  // debug hook's own API slots are wired up, which temporarily extend it.
+  if (frameIndex == fiber->numFrames - 1)
+  {
+    if (vm->debugSavedStackTop != nullptr) return vm->debugSavedStackTop;
+    return fiber->stackTop;
+  }
+
+  return fiber->frames[frameIndex + 1].stackStart;
+}
+
+int wrenDebugGetLocalCount(WrenVM* vm, int frame)
+{
+  CallFrame* callFrame = debugGetFrame(vm, frame);
+  if (callFrame == nullptr) return 0;
+
+  Value* end = debugFrameLocalEnd(vm, vm->fiber,
+                                  vm->fiber->numFrames - 1 - frame);
+  return (int)(end - callFrame->stackStart);
+}
+
+void wrenDebugGetLocal(WrenVM* vm, int frame, int index, int slot)
+{
+  CallFrame* callFrame = debugGetFrame(vm, frame);
+  ASSERT(callFrame != nullptr, "Frame index out of range.");
+
+  Value* end = debugFrameLocalEnd(vm, vm->fiber,
+                                  vm->fiber->numFrames - 1 - frame);
+  ASSERT(index >= 0 && callFrame->stackStart + index < end,
+         "Local index out of range.");
+  ASSERT(slot >= 0 && slot < wrenGetSlotCount(vm), "Not that many slots.");
+
+  vm->apiStack[slot] = callFrame->stackStart[index];
+}
+
+// Returns the module of the function executing in call frame [frame], numbered
+// the way the public debug API exposes frames.
+static ObjModule* debugGetFrameModule(WrenVM* vm, int frame)
+{
+  CallFrame* callFrame = debugGetFrame(vm, frame);
+  if (callFrame == nullptr) return nullptr;
+  return callFrame->closure->fn->module;
+}
+
+int wrenDebugGetModuleVariableCount(WrenVM* vm, int frame)
+{
+  ObjModule* module = debugGetFrameModule(vm, frame);
+  if (module == nullptr) return 0;
+  return module->variableNames.count;
+}
+
+const char* wrenDebugGetModuleVariableName(WrenVM* vm, int frame, int index)
+{
+  ObjModule* module = debugGetFrameModule(vm, frame);
+  ASSERT(module != nullptr, "Frame index out of range.");
+  ASSERT(index >= 0 && index < module->variableNames.count,
+         "Variable index out of range.");
+  return module->variableNames.data[index]->value;
+}
+
+void wrenDebugGetModuleVariable(WrenVM* vm, int frame, int index, int slot)
+{
+  ObjModule* module = debugGetFrameModule(vm, frame);
+  ASSERT(module != nullptr, "Frame index out of range.");
+  ASSERT(index >= 0 && index < module->variables.count,
+         "Variable index out of range.");
+  ASSERT(slot >= 0 && slot < wrenGetSlotCount(vm), "Not that many slots.");
+
+  vm->apiStack[slot] = module->variables.data[index];
+}

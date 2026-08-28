@@ -140,6 +140,19 @@ struct WrenVM
   // There is a single global symbol table for all method names on all classes.
   // Method calls are dispatched directly by index in this table.
   SymbolTable methodNames;
+
+  // The debug hook, or NULL if debugging is not in use. When set, it is
+  // invoked from the interpreter loop on each new source line. See the debug
+  // API declarations in wren.h.
+  WrenDebugHookFn debugHook;
+
+  // Opaque value passed back to the debug hook.
+  void* debugHookData;
+
+  // While the debug hook is running, its API slots extend the fiber's stack
+  // top. This remembers the real top so that the frame inspection functions
+  // still report the frame's own slots. NULL when the hook isn't running.
+  Value* debugSavedStackTop;
 };
 
 // A generic allocation function that handles all explicit memory management.
