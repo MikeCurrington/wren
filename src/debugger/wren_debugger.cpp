@@ -1,9 +1,18 @@
 #include "wren_debugger.h"
 
+#include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <csignal>
 #include <cstdio>
 #include <cstring>
+#include <deque>
+#include <map>
+#include <mutex>
+#include <set>
+#include <string>
+
+#include "dap_io.h"
 
 // The debugger reads live VM state directly, exactly like the VM's own stack
 // trace printer does.
@@ -117,7 +126,119 @@ namespace debug
     }
   }
 
-  Debugger::Debugger() = default;
+  // All debugger state and behavior. The public header exposes only an
+  // opaque impl pointer so that hosts including wren_debugger.h don't pull
+  // in any DAP or VM internals.
+  struct Debugger::Impl
+  {
+    // How the VM should run after the client resumes it.
+    enum class StepMode
+    {
+      None,   // run freely
+      In,     // stop at the next line event in any frame
+      Over,   // stop at the next line event at or above the starting depth
+      Out     // stop after returning above the starting depth
+    };
+
+    // A DAP request that has to be answered on the VM thread because it
+    // inspects live paused state (stack, variables).
+    struct VmRequest
+    {
+      Json request;
+    };
+
+    // A registered "variablesReference": the client expands these lazily
+    // to list the contents of a scope or container value.
+    struct VariableRef
+    {
+      enum class Kind
+      {
+        Locals,           // [frame]'s stack slots
+        ModuleVariables,  // [frame]'s module's top-level variables
+        List,
+        Map,
+        Instance
+      };
+
+      Kind kind = Kind::Locals;
+      int frame = 0;                 // public frame index (0 = innermost)
+      WrenHandle* value = nullptr;   // for container kinds
+    };
+
+    Impl() = default;
+
+    // ---- lifecycle (called by the public forwarding methods) ----
+    bool attach(WrenVM* vm, int port);
+    void detach();
+    void registerModulePath(const std::string& module,
+                            const std::string& path);
+    bool waitForConfiguration(int timeoutMs);
+    void notifyExecutionEnded();
+    void setStopOnEntry(bool stopOnEntry);
+    void writeOutput(const std::string& text);
+
+    // ---- runs on the VM thread ----
+    static void hookThunk(WrenVM* vm, WrenDebugEvent event, void* userData);
+    void onLineEvent();
+    void pauseLoop();
+    void runVmRequest(const VmRequest& request);
+
+    // ---- runs on the DAP thread ----
+    void handleMessage(Json message);
+    std::string moduleForPath(const std::string& path);
+    void sendResponse(const Json& request, Json body);
+    void sendErrorResponse(const Json& request, const std::string& message);
+    void sendEvent(const std::string& event, Json body);
+    void resume(StepMode mode);
+
+    // ---- either thread ----
+    void send(Json message);
+
+    // ---- VM-state helpers, must run with the VM paused ----
+    Json buildStackFrames();
+    Json buildScopes(int frame);
+    Json buildVariables(int reference);
+    int makeVariableRef(VariableRef::Kind kind, int frame, WrenHandle* value);
+    void clearVariableRefs();
+    void setSlotFromRef(const VariableRef& ref, int slot);
+    bool isBreakpointAt(const WrenDebugFrameInfo& info);
+
+    WrenVM* vm_ = nullptr;
+    DapConnection connection_;
+
+    std::mutex mutex_;
+    std::condition_variable cv_;
+    std::condition_variable configurationCv_;
+
+    std::atomic<int> sequence_{1};
+
+    // Breakpoints keyed by resolved Wren module name.
+    std::map<std::string, std::set<int>> breakpoints_;
+
+    // Bidirectional module name <-> source path mapping.
+    std::map<std::string, std::string> moduleToPath_;
+    std::map<std::string, std::string> pathToModule_;
+
+    // Pause/stepping state. Guarded by [mutex_].
+    bool paused_ = false;
+    bool pauseRequested_ = false;
+    bool stopOnEntry_ = false;
+    bool configurationDone_ = false;
+    StepMode stepMode_ = StepMode::None;
+    int stepFromFrameCount_ = 0;
+    std::string stopReason_;
+    std::deque<VmRequest> vmRequests_;
+
+    // variablesReference bookkeeping. Valid only while paused.
+    std::map<int, VariableRef> variableRefs_;
+    std::map<int, std::string> sourceReferences_;
+    int nextVariableRef_ = 1;
+    int nextSourceReference_ = 1;
+  };
+
+  Debugger::Debugger()
+    : impl_(new Impl())
+  {}
 
   Debugger::~Debugger()
   {
@@ -125,6 +246,46 @@ namespace debug
   }
 
   bool Debugger::attach(WrenVM* vm, int port)
+  {
+    return impl_->attach(vm, port);
+  }
+
+  void Debugger::detach()
+  {
+    impl_->detach();
+  }
+
+  void Debugger::registerModulePath(const std::string& module,
+                                    const std::string& path)
+  {
+    impl_->registerModulePath(module, path);
+  }
+
+  bool Debugger::waitForConfiguration(int timeoutMs)
+  {
+    return impl_->waitForConfiguration(timeoutMs);
+  }
+
+  void Debugger::notifyExecutionEnded()
+  {
+    impl_->notifyExecutionEnded();
+  }
+
+  void Debugger::setStopOnEntry(bool stopOnEntry)
+  {
+    impl_->setStopOnEntry(stopOnEntry);
+  }
+
+  void Debugger::writeOutput(const std::string& text)
+  {
+    impl_->writeOutput(text);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Impl: lifecycle
+  // ---------------------------------------------------------------------------
+
+  bool Debugger::Impl::attach(WrenVM* vm, int port)
   {
     if (!connection_.listen(port)) return false;
 
@@ -138,7 +299,7 @@ namespace debug
     return true;
   }
 
-  void Debugger::detach()
+  void Debugger::Impl::detach()
   {
     if (vm_ != nullptr)
     {
@@ -157,15 +318,15 @@ namespace debug
     connection_.stop();
   }
 
-  void Debugger::registerModulePath(const std::string& module,
-                                    const std::string& path)
+  void Debugger::Impl::registerModulePath(const std::string& module,
+                                          const std::string& path)
   {
     std::unique_lock<std::mutex> lock(mutex_);
     moduleToPath_[module] = path;
     pathToModule_[path] = module;
   }
 
-  bool Debugger::waitForConfiguration(int timeoutMs)
+  bool Debugger::Impl::waitForConfiguration(int timeoutMs)
   {
     std::unique_lock<std::mutex> lock(mutex_);
     stopOnEntry_ = true;
@@ -182,7 +343,7 @@ namespace debug
     return configured && configurationDone_;
   }
 
-  void Debugger::notifyExecutionEnded()
+  void Debugger::Impl::notifyExecutionEnded()
   {
     if (!connection_.isConnected()) return;
 
@@ -192,13 +353,13 @@ namespace debug
     sendEvent("terminated", Json::object());
   }
 
-  void Debugger::setStopOnEntry(bool stopOnEntry)
+  void Debugger::Impl::setStopOnEntry(bool stopOnEntry)
   {
     std::unique_lock<std::mutex> lock(mutex_);
     stopOnEntry_ = stopOnEntry;
   }
 
-  void Debugger::writeOutput(const std::string& text)
+  void Debugger::Impl::writeOutput(const std::string& text)
   {
     if (!connection_.isConnected()) return;
 
@@ -212,12 +373,13 @@ namespace debug
   // VM thread: the debug hook
   // ---------------------------------------------------------------------------
 
-  void Debugger::hookThunk(WrenVM* vm, WrenDebugEvent event, void* userData)
+  void Debugger::Impl::hookThunk(WrenVM* vm, WrenDebugEvent event,
+                                 void* userData)
   {
-    static_cast<Debugger*>(userData)->onLineEvent();
+    static_cast<Impl*>(userData)->onLineEvent();
   }
 
-  void Debugger::onLineEvent()
+  void Debugger::Impl::onLineEvent()
   {
     // Decide whether to stop on this line. The decision reads and updates
     // state guarded by [mutex_]; the VM's own state is stable because the
@@ -268,7 +430,7 @@ namespace debug
     pauseLoop();
   }
 
-  bool Debugger::isBreakpointAt(const WrenDebugFrameInfo& info)
+  bool Debugger::Impl::isBreakpointAt(const WrenDebugFrameInfo& info)
   {
     auto moduleBreakpoints = breakpoints_.find(info.module);
     if (moduleBreakpoints == breakpoints_.end()) return false;
@@ -278,7 +440,7 @@ namespace debug
   // Blocks the VM thread while the client inspects the paused program. DAP
   // requests that need live VM state are dequeued and answered here; the
   // loop ends when the client resumes execution.
-  void Debugger::pauseLoop()
+  void Debugger::Impl::pauseLoop()
   {
     {
       std::unique_lock<std::mutex> lock(mutex_);
@@ -311,7 +473,7 @@ namespace debug
     }
   }
 
-  void Debugger::runVmRequest(const VmRequest& request)
+  void Debugger::Impl::runVmRequest(const VmRequest& request)
   {
     const std::string command = request.request.getString("command");
     const Json* arguments = request.request.find("arguments");
@@ -345,7 +507,7 @@ namespace debug
   // Paused-state queries (VM thread, VM suspended in the hook)
   // ---------------------------------------------------------------------------
 
-  Json Debugger::buildStackFrames()
+  Json Debugger::Impl::buildStackFrames()
   {
     Json frames = Json::array();
 
@@ -404,8 +566,8 @@ namespace debug
     return body;
   }
 
-  int Debugger::makeVariableRef(VariableRef::Kind kind, int frame,
-                                WrenHandle* value)
+  int Debugger::Impl::makeVariableRef(VariableRef::Kind kind, int frame,
+                                      WrenHandle* value)
   {
     int reference = nextVariableRef_++;
     VariableRef& ref = variableRefs_[reference];
@@ -415,7 +577,7 @@ namespace debug
     return reference;
   }
 
-  void Debugger::clearVariableRefs()
+  void Debugger::Impl::clearVariableRefs()
   {
     for (auto& entry : variableRefs_)
     {
@@ -428,7 +590,7 @@ namespace debug
     sourceReferences_.clear();
   }
 
-  Json Debugger::buildScopes(int frame)
+  Json Debugger::Impl::buildScopes(int frame)
   {
     Json scopes = Json::array();
 
@@ -465,7 +627,7 @@ namespace debug
     return body;
   }
 
-  Json Debugger::buildVariables(int reference)
+  Json Debugger::Impl::buildVariables(int reference)
   {
     Json variables = Json::array();
     wrenEnsureSlots(vm_, 4);
@@ -584,7 +746,7 @@ namespace debug
     return body;
   }
 
-  void Debugger::setSlotFromRef(const VariableRef& ref, int slot)
+  void Debugger::Impl::setSlotFromRef(const VariableRef& ref, int slot)
   {
     wrenEnsureSlots(vm_, slot + 1);
     wrenSetSlotHandle(vm_, slot, ref.value);
@@ -594,7 +756,7 @@ namespace debug
   // DAP thread: request handling
   // ---------------------------------------------------------------------------
 
-  void Debugger::handleMessage(Json message)
+  void Debugger::Impl::handleMessage(Json message)
   {
     if (message.getString("type") != "request") return;
     const std::string command = message.getString("command");
@@ -809,7 +971,7 @@ namespace debug
     sendErrorResponse(message, "Unknown command '" + command + "'");
   }
 
-  std::string Debugger::moduleForPath(const std::string& path)
+  std::string Debugger::Impl::moduleForPath(const std::string& path)
   {
     std::unique_lock<std::mutex> lock(mutex_);
 
@@ -826,7 +988,7 @@ namespace debug
     return "";
   }
 
-  void Debugger::resume(StepMode mode)
+  void Debugger::Impl::resume(StepMode mode)
   {
     std::unique_lock<std::mutex> lock(mutex_);
     if (!paused_) return;
@@ -843,13 +1005,13 @@ namespace debug
   // Message plumbing (either thread)
   // ---------------------------------------------------------------------------
 
-  void Debugger::send(Json message)
+  void Debugger::Impl::send(Json message)
   {
     message.set("seq", Json::integer(sequence_.fetch_add(1)));
     connection_.send(message);
   }
 
-  void Debugger::sendResponse(const Json& request, Json body)
+  void Debugger::Impl::sendResponse(const Json& request, Json body)
   {
     Json response = Json::object();
     response.set("type", Json::string("response"));
@@ -860,8 +1022,8 @@ namespace debug
     send(std::move(response));
   }
 
-  void Debugger::sendErrorResponse(const Json& request,
-                                   const std::string& message)
+  void Debugger::Impl::sendErrorResponse(const Json& request,
+                                         const std::string& message)
   {
     Json response = Json::object();
     response.set("type", Json::string("response"));
@@ -872,7 +1034,7 @@ namespace debug
     send(std::move(response));
   }
 
-  void Debugger::sendEvent(const std::string& event, Json body)
+  void Debugger::Impl::sendEvent(const std::string& event, Json body)
   {
     Json message = Json::object();
     message.set("type", Json::string("event"));

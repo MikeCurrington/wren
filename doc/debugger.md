@@ -11,7 +11,8 @@ running Wren VM — including a VM embedded inside a host application.
 | Component | Location | Role |
 |---|---|---|
 | VM debug hook | `src/vm/wren_debug.cpp`, `src/include/wren.h` | Fires on each source line change; frame/local/module-variable inspection APIs |
-| Debugger session | `src/debugger/wren_debugger.{h,cpp}` | Breakpoints, stepping, pause/resume, stack & variables over DAP |
+| Debugger interface | `src/include/wren_debugger.h` | Public `wren::debug::Debugger` API for hosts |
+| Debugger session | `src/debugger/wren_debugger.cpp` | Breakpoints, stepping, pause/resume, stack & variables over DAP |
 | Transport | `src/debugger/dap_io.{h,cpp}`, `src/debugger/wren_json.{h,cpp}` | DAP framing over TCP, minimal JSON |
 | Example host | `example/debugger/main.cpp` | Standalone runnable host (`wren_debug_example`) |
 | VS Code bridge | `extensions/vscode-wren-debug/` | Contributes the `wren` debug type; points VS Code at the host's port |

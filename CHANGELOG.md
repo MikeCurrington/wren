@@ -2,7 +2,8 @@
 
 ### Debugger
 - Add a source-level debugger: a VM debug hook (`wrenSetDebugHook`, frame and
-  variable inspection in `wren.h`), an optional `wren_debugger` library that
+  variable inspection in `wren.h`), a public `wren::debug::Debugger` interface
+  in `src/include/wren_debugger.h`, an optional `wren_debugger` library that
   serves the Debug Adapter Protocol over TCP (`src/debugger/`, CMake option
   `WREN_DEBUGGER`), and a `vscode-wren-debug` VS Code extension. Supports
   breakpoints, pause/continue, step over/in/out, call stack, and variable
