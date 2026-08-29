@@ -88,6 +88,25 @@ output appears in VS Code's debug console.
 The host application owns the threading contract: the VM must run on one
 thread (as usual), and the debugger owns the others.
 
+### wren.hpp (C++20 bindings)
+
+When a host links `wren_debugger` (which publicly defines
+`WREN_ENABLE_DEBUGGER`), `wren::VM::Config` gains a debug switch:
+
+```c++
+wren::VM::Config config;
+config.wrenConfig.writeFn = myWrite;   // still called; also mirrored to VS Code
+config.debug = true;                   // serve DAP on config.debugPort (4711)
+wren::VM vm(std::move(config));
+
+vm.registerModulePath("main", "/abs/path/main.wren");
+vm.interpret("main", source);
+// For one-shot hosts: vm.debugger()->notifyExecutionEnded();
+```
+
+Without `wren_debugger` linked, `Config::debug` still exists but the debug
+code is compiled out, so plain embedders take no new dependency.
+
 ## VM debug API
 
 For hosts that want to implement their own debugging policy instead of using

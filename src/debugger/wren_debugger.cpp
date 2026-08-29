@@ -303,6 +303,9 @@ namespace debug
   {
     if (vm_ != nullptr)
     {
+      // Release any handles kept alive for the variables pane before the
+      // host frees the VM.
+      clearVariableRefs();
       wrenSetDebugHook(vm_, nullptr, nullptr);
       vm_ = nullptr;
     }

@@ -6,6 +6,13 @@
 #include <string>
 #include "../src/include/wren.hpp"
 
+#ifdef WREN_ENABLE_DEBUGGER
+#include <cstring>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#endif
+
 // Test counter
 static int testsPassed = 0;
 static int testsFailed = 0;
@@ -549,6 +556,53 @@ System.print("fresh counter: %(fresh.counter)")
   TEST_ASSERT(Widget::root->counter == 1, "foreign by-value return is a copy");
   Widget::root.reset();
   printf("\n");
+
+#ifdef WREN_ENABLE_DEBUGGER
+  // Test 14: Config::debug spins up a DAP debugger for this VM
+  {
+    printf("Test 14: debugger enabled through VM::Config\n");
+
+    const int debugPort = 47129;
+    wren::VM::Config debugConfig;
+    debugConfig.debug = true;
+    debugConfig.debugPort = debugPort;
+    wren::VM debugVm(std::move(debugConfig));
+
+    TEST_ASSERT(debugVm.debugger() != nullptr, "debugger attached when enabled");
+
+    // Something must actually be serving on the port.
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr_in address;
+    memset(&address, 0, sizeof(address));
+    address.sin_family = AF_INET;
+    address.sin_port = htons(static_cast<uint16_t>(debugPort));
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    bool listening = sock >= 0 &&
+        connect(sock, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0;
+    if (sock >= 0) close(sock);
+    TEST_ASSERT(listening, "debug port accepts connections");
+
+    // Scripts must run normally with the debug hook installed.
+    auto& mod = debugVm.module("debug_test");
+    mod.klass<Widget>("Widget").funcStatic<&Widget::make, int>("make")
+        .func<&Widget::bump, int>("bump").varReadOnly<&Widget::counter>("counter");
+    const char* debugSource = R"WREN(
+import "debug_test" for Widget
+var w = Widget.make(21)
+w.bump(21)
+System.print("bumped to %(w.counter)")
+)WREN";
+    WrenInterpretResult debugResult = debugVm.interpret("main", debugSource);
+    TEST_ASSERT(debugResult == WREN_RESULT_SUCCESS, "interpret works with hook active");
+
+    // Module path registration is accepted (no observable result; this just
+    // exercises the passthrough).
+    debugVm.registerModulePath("main", "/tmp/debug_test_main.wren");
+
+    // Destructor detaches the hook before freeing the VM.
+  }
+  printf("\n");
+#endif
 
   // Summary
   printf("=====================================\n");

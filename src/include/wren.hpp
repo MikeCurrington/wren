@@ -40,6 +40,16 @@ extern "C" {
   #include "wren.h"
 }
 
+// Debugging support is opt-in at the linker level: define WREN_ENABLE_DEBUGGER
+// (the wren_debugger CMake target defines it publicly for anything that links
+// it) to add VM::Config::debug, which serves a Debug Adapter Protocol
+// debugger for this VM. Without the macro the fields still exist but the
+// debug code is compiled out, so embedding wren.hpp does not require the
+// wren_debugger library.
+#ifdef WREN_ENABLE_DEBUGGER
+  #include "wren_debugger.h"
+#endif
+
 namespace wren {
 
 class VM;
@@ -751,6 +761,20 @@ class VM {
 public:
   struct Config {
     WrenConfiguration wrenConfig;
+
+#ifdef WREN_ENABLE_DEBUGGER
+    // Serve a Debug Adapter Protocol debugger (breakpoints, stepping, call
+    // stack, variables) for this VM, so the scripts it runs can be debugged
+    // from VS Code. See src/include/wren_debugger.h. Requires linking the
+    // wren_debugger library, which defines WREN_ENABLE_DEBUGGER for this
+    // header. When enabled, System.print() output and errors are mirrored to
+    // the client's debug console by wrapping writeFn/errorFn.
+    bool debug = false;
+
+    // The port the debugger listens on (127.0.0.1).
+    int debugPort = 4711;
+#endif
+
     Config() { wrenInitConfiguration(&wrenConfig); }
   };
 
@@ -759,19 +783,62 @@ public:
     config_.wrenConfig.userData = this;
     config_.wrenConfig.bindForeignMethodFn = &VM::bindMethodCb;
     config_.wrenConfig.bindForeignClassFn = &VM::bindClassCb;
+#ifdef WREN_ENABLE_DEBUGGER
+    if (config_.debug) {
+      // Mirror output to the client's debug console. The user's callbacks
+      // are kept and invoked by the trampolines below.
+      userWriteFn_ = config_.wrenConfig.writeFn;
+      userErrorFn_ = config_.wrenConfig.errorFn;
+      config_.wrenConfig.writeFn = &VM::debugWriteCb;
+      config_.wrenConfig.errorFn = &VM::debugErrorCb;
+    }
+#endif
     // Auto-serve source for modules registered via .module()
     if (!config_.wrenConfig.loadModuleFn) {
       config_.wrenConfig.loadModuleFn = &VM::loadModuleCb;
     }
     vm_ = wrenNewVM(&config_.wrenConfig);
+#ifdef WREN_ENABLE_DEBUGGER
+    if (config_.debug) {
+      debugger_ = std::make_unique<debug::Debugger>();
+      // If the port is taken, debugging stays off rather than failing
+      // construction; the caller can tell via debugger() == nullptr.
+      if (!debugger_->attach(vm_, config_.debugPort)) debugger_.reset();
+    }
+#endif
   }
-  ~VM() { if (vm_) wrenFreeVM(vm_); }
+  ~VM() {
+#ifdef WREN_ENABLE_DEBUGGER
+    // Uninstall the hook before the VM is freed. Must not be called while
+    // the VM is paused in the debug hook (i.e. destroy the VM off the
+    // debugger thread only after wrenInterpret/wrenCall have returned).
+    if (debugger_) debugger_->detach();
+#endif
+    if (vm_) wrenFreeVM(vm_);
+  }
   VM(const VM&) = delete;
   VM& operator=(const VM&) = delete;
   VM(VM&&) = delete;
   VM& operator=(VM&&) = delete;
 
   WrenVM* raw() const { return vm_; }
+
+#ifdef WREN_ENABLE_DEBUGGER
+  // The VM's debugger, or nullptr when Config::debug was false or the
+  // debug port could not be bound. Use it for waitForConfiguration(),
+  // notifyExecutionEnded(), and finer control.
+  debug::Debugger* debugger() { return debugger_.get(); }
+
+  // Tells the debugger that Wren module [module] was loaded from [path], so
+  // VS Code can map source files to module names for breakpoints. No-op
+  // unless Config::debug was set and the debugger attached. wren.hpp itself
+  // has no filesystem notion, so file-loading hosts call this per module.
+  void registerModulePath(std::string_view module, std::string_view path) {
+    if (debugger_) {
+      debugger_->registerModulePath(std::string(module), std::string(path));
+    }
+  }
+#endif
 
   Module& module(std::string name) {
     auto& m = modules_[name];
@@ -832,6 +899,34 @@ public:
   WrenType slotType(int s) const { return wrenGetSlotType(vm_, s); }
 
 private:
+#ifdef WREN_ENABLE_DEBUGGER
+  // Invoke the user's write/error callbacks, then mirror the text to the
+  // debug client's console.
+  static void debugWriteCb(WrenVM* vm, const char* text) {
+    auto* self = static_cast<VM*>(wrenGetUserData(vm));
+    if (self->userWriteFn_) self->userWriteFn_(vm, text);
+    if (self->debugger_) self->debugger_->writeOutput(text);
+  }
+
+  static void debugErrorCb(WrenVM* vm, WrenErrorType type, const char* mod,
+                           int line, const char* message) {
+    auto* self = static_cast<VM*>(wrenGetUserData(vm));
+    if (self->userErrorFn_) self->userErrorFn_(vm, type, mod, line, message);
+    if (!self->debugger_) return;
+    std::string text;
+    if (type == WREN_ERROR_COMPILE) {
+      text = "[" + std::string(mod ? mod : "?") + " line " +
+             std::to_string(line) + "] " + message + "\n";
+    } else if (type == WREN_ERROR_RUNTIME) {
+      text = std::string(message) + "\n";
+    } else {
+      text = "[" + std::string(mod ? mod : "?") + " line " +
+             std::to_string(line) + "] in " + message + "\n";
+    }
+    self->debugger_->writeOutput(text);
+  }
+#endif
+
   static WrenForeignMethodFn bindMethodCb(WrenVM* vm, const char* mod,
                                           const char* cls, bool isStatic,
                                           const char* sig) {
@@ -896,6 +991,12 @@ private:
   Config config_;
   WrenVM* vm_ = nullptr;
   std::unordered_map<std::string, std::unique_ptr<Module>> modules_;
+
+#ifdef WREN_ENABLE_DEBUGGER
+  std::unique_ptr<debug::Debugger> debugger_;
+  WrenWriteFn userWriteFn_ = nullptr;
+  WrenErrorFn userErrorFn_ = nullptr;
+#endif
 };
 
 } // namespace wren

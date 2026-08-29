@@ -8,6 +8,9 @@
   `WREN_DEBUGGER`), and a `vscode-wren-debug` VS Code extension. Supports
   breakpoints, pause/continue, step over/in/out, call stack, and variable
   inspection. See `doc/debugger.md` and `util/dap_smoke_test.py`.
+- wren.hpp: add `VM::Config::debug` and `debugPort` (enabled by linking
+  `wren_debugger`, which defines `WREN_ENABLE_DEBUGGER`): the VM serves the
+  debugger and mirrors `System.print`/errors to the debug console.
 
 ## 0.4.0
 

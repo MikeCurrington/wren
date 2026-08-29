@@ -66,7 +66,7 @@ if (WREN_DEBUGGER AND WREN_BUILD_STATIC)
         ${WREN_SRC}/include
         ${WREN_SRC}/vm
     )
-    target_compile_definitions(wren_debugger PUBLIC ${WREN_DEFINES})
+    target_compile_definitions(wren_debugger PUBLIC ${WREN_DEFINES} WREN_ENABLE_DEBUGGER)
     target_compile_features(wren_debugger PUBLIC cxx_std_20)
     target_link_libraries(wren_debugger PUBLIC wren)
 
@@ -99,6 +99,10 @@ if(WREN_BUILD_TEST AND WREN_BUILD_STATIC)
     # Standalone C++20 bindings test
     add_executable(cpp20_bindings_test ${WREN_TEST}/cpp20_bindings_test.cpp)
     target_link_libraries(cpp20_bindings_test PUBLIC wren m)
+    if (WREN_DEBUGGER)
+        # Enables the debugger section of wren.hpp for the test.
+        target_link_libraries(cpp20_bindings_test PUBLIC wren_debugger)
+    endif()
     
     add_test(NAME cpp20_bindings_test COMMAND cpp20_bindings_test)
   endif()
