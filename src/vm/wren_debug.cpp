@@ -520,6 +520,31 @@ void wrenDebugGetLocal(WrenVM* vm, int frame, int index, int slot)
   vm->apiStack[slot] = callFrame->stackStart[index];
 }
 
+const char* wrenDebugGetLocalName(WrenVM* vm, int frame, int index)
+{
+  CallFrame* callFrame = debugGetFrame(vm, frame);
+  if (callFrame == nullptr || index < 0) return nullptr;
+
+  ObjFn* fn = callFrame->closure->fn;
+  if (fn->debug == nullptr) return nullptr;
+
+  int offset = (int)(callFrame->ip - fn->code.data);
+
+  // Entries are in increasing bytecode offset order, but are interleaved by
+  // slot, so scan them all. The last entry for [index] at or before the
+  // instruction the frame is about to execute wins.
+  const char* name = nullptr;
+  for (int i = 0; i < fn->debug->localNames.count; i++)
+  {
+    LocalDebugName* entry = &fn->debug->localNames.data[i];
+    if (entry->slot == index && entry->offset <= offset)
+    {
+      name = entry->name;
+    }
+  }
+  return name;
+}
+
 // Returns the module of the function executing in call frame [frame], numbered
 // the way the public debug API exposes frames.
 static ObjModule* debugGetFrameModule(WrenVM* vm, int frame)

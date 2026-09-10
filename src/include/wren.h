@@ -682,9 +682,15 @@ WREN_API bool wrenDebugGetFrameInfo(WrenVM* vm, int frame,
 
 // Returns the number of stack slots used by call frame [frame]. This includes
 // the receiver, parameters, local variables, and any temporaries the function
-// currently has on the stack. Local variable *names* are not retained at
-// runtime, so slots are identified by position only.
+// currently has on the stack.
 WREN_API int wrenDebugGetLocalCount(WrenVM* vm, int frame);
+
+// Returns the name of the local variable in stack slot [index] of call frame
+// [frame] at the point the frame is currently paused, or NULL if the slot
+// holds an unnamed temporary or a variable that has gone out of scope. The
+// returned string is owned by the VM and remains valid while the VM is paused
+// in the hook.
+WREN_API const char* wrenDebugGetLocalName(WrenVM* vm, int frame, int index);
 
 // Copies the value of local slot [index] of call frame [frame] into [slot].
 // It is an error if [frame] or [index] is out of range, or if [slot] is not

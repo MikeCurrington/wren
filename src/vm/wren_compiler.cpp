@@ -525,6 +525,28 @@ static int addConstant(Compiler* compiler, Value constant)
   return compiler->fn->constants.count - 1;
 }
 
+// Records that stack slot [slot] in the function being compiled is named
+// [name] (or unnamed if [name] is NULL) from the current bytecode offset on.
+// The debugger uses these entries to display local variable names.
+static void addLocalDebugName(Compiler* compiler, int slot, const char* name,
+                              int length)
+{
+  LocalDebugName entry;
+  entry.offset = compiler->fn->code.count;
+  entry.slot = slot;
+  if (name == nullptr)
+  {
+    entry.name = nullptr;
+  }
+  else
+  {
+    entry.name = ALLOCATE_ARRAY(compiler->parser->vm, char, length + 1);
+    memcpy(entry.name, name, length);
+    entry.name[length] = '\0';
+  }
+  compiler->fn->debug->localNames.write(compiler->parser->vm, entry);
+}
+
 // Initializes [compiler].
 static void initCompiler(Compiler* compiler, Parser* parser, Compiler* parent,
                          bool isMethod)
@@ -588,6 +610,10 @@ static void initCompiler(Compiler* compiler, Parser* parser, Compiler* parent,
   compiler->fn = wrenConstruct<ObjFn>(parser->vm, 0,
                                       parser->module, compiler->numLocals,
                                       debug);
+
+  // Account for the receiver slot in the debug name table.
+  addLocalDebugName(compiler, 0, compiler->locals[0].name,
+                    compiler->locals[0].length);
 }
 
 // Lexing ----------------------------------------------------------------------
@@ -1386,6 +1412,7 @@ static int addLocal(Compiler* compiler, const char* name, int length)
   local->length = length;
   local->depth = compiler->scopeDepth;
   local->isUpvalue = false;
+  addLocalDebugName(compiler, compiler->numLocals, name, length);
   return compiler->numLocals++;
 }
 
@@ -1523,6 +1550,12 @@ static int discardLocals(Compiler* compiler, int depth)
 static void popScope(Compiler* compiler)
 {
   int popped = discardLocals(compiler, compiler->scopeDepth);
+  // Mark the discarded slots unnamed from here on so that the debugger does
+  // not show stale names after the slots get reused.
+  for (int i = compiler->numLocals - popped; i < compiler->numLocals; i++)
+  {
+    addLocalDebugName(compiler, i, nullptr, 0);
+  }
   compiler->numLocals -= popped;
   compiler->numSlots -= popped;
   compiler->scopeDepth--;

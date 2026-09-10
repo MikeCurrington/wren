@@ -237,7 +237,7 @@ ObjForeign::ObjForeign(WrenVM* vm, ObjClass* _classObj, size_t size)
 FnDebug::FnDebug(WrenVM*)
 {
   name = nullptr;
-  // The source lines buffer constructs itself empty.
+  // The source lines and local name buffers construct themselves empty.
 }
 
 ObjFn::ObjFn(WrenVM* vm, ObjModule* _module, int _maxSlots, FnDebug* _debug)
@@ -1213,6 +1213,11 @@ void wrenFreeObj(WrenVM* vm, Obj* obj)
       fn->constants.clear(vm);
       fn->code.clear(vm);
       fn->debug->sourceLines.clear(vm);
+      for (int i = 0; i < fn->debug->localNames.count; i++)
+      {
+        DEALLOCATE(vm, fn->debug->localNames.data[i].name);
+      }
+      fn->debug->localNames.clear(vm);
       DEALLOCATE(vm, fn->debug->name);
       DEALLOCATE(vm, fn->debug);
       break;

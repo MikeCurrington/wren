@@ -125,9 +125,8 @@ Inside the hook, the standard slot API (`wrenEnsureSlots`, `wrenGetSlotDouble`,
 
 ## Current limitations
 
-- Local variables are shown by slot position (`slot0`, ...) because the
-  compiler does not retain local variable names; module variables, `this` in
-  methods, and list/map/instance contents are shown properly.
+- Locals that are expression temporaries or out of scope have no name and are
+  shown by slot position (`slot0`, ...) after the named locals.
 - No expression evaluation / watch / REPL while paused.
 - No conditional or exception breakpoints.
 - Fibers are treated as a single thread; only the running fiber is shown.

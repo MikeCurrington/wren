@@ -248,6 +248,21 @@ struct ObjUpvalue : public Obj
 // or modifies the running fiber, it returns `false`.
 typedef bool (*Primitive)(WrenVM* vm, Value* args);
 
+// One entry in a function's table of local variable names, recorded by the
+// compiler as it declares and scopes out locals. From bytecode [offset] on,
+// stack [slot] holds the local named [name], or an unnamed temporary or
+// out-of-scope slot if [name] is nullptr.
+struct LocalDebugName
+{
+  int offset;
+  int slot;
+
+  // Heap allocated and owned by the FnDebug.
+  char* name;
+};
+
+using LocalDebugNameBuffer = Buffer<LocalDebugName>;
+
 // TODO: See if it's actually a perf improvement to have this in a separate
 // struct instead of in ObjFn.
 // Stores debugging information for a function used for things like stack
@@ -264,6 +279,10 @@ struct FnDebug
   // bytecode in the function's bytecode array. The value of that element is
   // the line in the source code that generated that instruction.
   IntBuffer sourceLines;
+
+  // The names of the function's local variables by bytecode position.
+  // Entries are appended in increasing offset order while compiling.
+  LocalDebugNameBuffer localNames;
 };
 
 // A loaded module and the top-level variables it defines.

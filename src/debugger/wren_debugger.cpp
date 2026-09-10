@@ -31,7 +31,18 @@ namespace debug
     std::string formatNumber(double value)
     {
       char buffer[32];
-      snprintf(buffer, sizeof(buffer), "%g", value);
+      // Show integral values as integers so that large counts don't render in
+      // scientific notation.
+      if (value >= -9007199254740992.0 && value <= 9007199254740992.0 &&
+          value == static_cast<double>(static_cast<long long>(value)))
+      {
+        snprintf(buffer, sizeof(buffer), "%lld",
+                 static_cast<long long>(value));
+      }
+      else
+      {
+        snprintf(buffer, sizeof(buffer), "%g", value);
+      }
       return buffer;
     }
 
@@ -116,6 +127,31 @@ namespace debug
       if (!IS_OBJ(value)) return false;
       ObjType type = AS_OBJ(value)->type;
       return type == OBJ_LIST || type == OBJ_MAP || type == OBJ_INSTANCE;
+    }
+
+    // The DAP type string shown in the variables pane's type column.
+    std::string dapType(Value value)
+    {
+      if (IS_NUM(value)) return "number";
+      if (IS_BOOL(value)) return "bool";
+      if (IS_NULL(value)) return "null";
+      if (!IS_OBJ(value)) return "?";
+
+      switch (AS_OBJ(value)->type)
+      {
+        case OBJ_STRING: return "string";
+        case OBJ_LIST: return "list";
+        case OBJ_MAP: return "map";
+        case OBJ_RANGE: return "range";
+        case OBJ_CLASS: return "class";
+        case OBJ_FN:
+        case OBJ_CLOSURE: return "fn";
+        case OBJ_FIBER: return "fiber";
+        case OBJ_INSTANCE:
+        case OBJ_FOREIGN:
+          return AS_OBJ(value)->classObj->name->value;
+        default: return "object";
+      }
     }
 
     std::string basename(const std::string& path)
@@ -565,9 +601,9 @@ namespace debug
   {
     Json scopes = Json::array();
 
-    // The frame's stack slots: receiver, parameters, and locals. Local
-    // variable names are not retained at runtime, so slots are shown by
-    // position.
+    // The frame's stack slots: receiver, parameters, and locals, named where
+    // the compiler recorded a name. Unnamed slots are temporaries or
+    // out-of-scope variables and are labeled by position.
     {
       int reference = makeVariableRef(VariableRef::Kind::Locals, frame, nullptr);
       Json scope = Json::object();
@@ -621,6 +657,7 @@ namespace debug
         Json variable = Json::object();
         variable.set("name", Json::string(name));
         variable.set("value", Json::string(formatValue(value)));
+        variable.set("type", Json::string(dapType(value)));
         if (isExpandable(value))
         {
           vm_->apiStack[2] = value;
@@ -643,19 +680,31 @@ namespace debug
       {
         case VariableRef::Kind::Locals:
         {
-          // Local variable names are not retained at runtime. Slot 0 holds
-          // the receiver, so present it as "this" in methods.
+          // The compiler records the name of each stack slot while it is in
+          // scope. Slots it has no name for are expression temporaries or
+          // out-of-scope variables; they are shown after the named locals,
+          // labeled by position. Slot 0 holds the receiver, which the
+          // compiler names "this" in methods.
           WrenDebugFrameInfo info;
           wrenDebugGetFrameInfo(vm_, ref->frame, &info);
           bool isMethod = std::string(info.function) != "(script)";
 
           int count = wrenDebugGetLocalCount(vm_, ref->frame);
-          for (int i = 0; i < count; i++)
+          for (int pass = 0; pass < 2; pass++)
           {
-            wrenDebugGetLocal(vm_, ref->frame, i, 3);
-            std::string name = (i == 0 && isMethod)
-                ? "this" : "slot" + std::to_string(i);
-            appendVariable(name, vm_->apiStack[3]);
+            for (int i = 0; i < count; i++)
+            {
+              const char* localName = wrenDebugGetLocalName(vm_, ref->frame, i);
+              bool named = localName != nullptr || (i == 0 && isMethod);
+              if ((pass == 0) != named) continue;
+
+              wrenDebugGetLocal(vm_, ref->frame, i, 3);
+              std::string name;
+              if (i == 0 && isMethod) name = "this";
+              else if (localName != nullptr) name = localName;
+              else name = "slot" + std::to_string(i);
+              appendVariable(name, vm_->apiStack[3]);
+            }
           }
           break;
         }
