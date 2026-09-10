@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <memory>
 #include <string>
 
 #include "wren.h"
@@ -144,7 +145,7 @@ int main(int argc, const char* argv[])
   fclose(file);
   source.resize(read);
 
-  wren::debug::Debugger debugger;
+  std::unique_ptr<wren::debug::Debugger> debugger = wren::debug::MakeDebugger();
 
   WrenConfiguration config;
   wrenInitConfiguration(&config);
@@ -153,13 +154,13 @@ int main(int argc, const char* argv[])
   config.loadModuleFn = loadModuleFn;
 
   HostState state;
-  state.debugger = &debugger;
+  state.debugger = debugger.get();
   state.scriptDir = directoryOf(scriptPath);
   config.userData = &state;
 
   WrenVM* vm = wrenNewVM(&config);
 
-  if (!debugger.attach(vm, port))
+  if (!debugger->attach(vm, port))
   {
     fprintf(stderr, "Could not listen on port %d.\n", port);
     wrenFreeVM(vm);
@@ -170,11 +171,11 @@ int main(int argc, const char* argv[])
 
   // Register before waiting so breakpoints sent during initial configuration
   // can already be mapped from source paths to module names.
-  debugger.registerModulePath(scriptPath, scriptPath);
+  debugger->registerModulePath(scriptPath, scriptPath);
 
   if (waitMs >= 0)
   {
-    if (debugger.waitForConfiguration(waitMs))
+    if (debugger->waitForConfiguration(waitMs))
     {
       fprintf(stderr, "Client attached; configuration complete.\n");
     }
@@ -185,7 +186,7 @@ int main(int argc, const char* argv[])
   }
 
   WrenInterpretResult result = wrenInterpret(vm, scriptPath, source.c_str());
-  debugger.notifyExecutionEnded();
+  debugger->notifyExecutionEnded();
 
   wrenFreeVM(vm);
   return result == WREN_RESULT_SUCCESS ? 0 : 1;

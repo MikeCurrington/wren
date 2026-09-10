@@ -16,12 +16,12 @@
 //
 // Usage from the host:
 //
-//   wren::debug::Debugger debugger;
-//   debugger.attach(vm, 4711);                 // listens + installs hook
-//   debugger.registerModulePath("main", path); // module <-> file mapping
-//   debugger.waitForConfiguration();           // optional "debug from start"
+//   auto debugger = wren::debug::MakeDebugger();
+//   debugger->attach(vm, 4711);                 // listens + installs hook
+//   debugger->registerModulePath("main", path); // module <-> file mapping
+//   debugger->waitForConfiguration();           // optional "debug from start"
 //   wrenInterpret(vm, "main", source);
-//   debugger.notifyExecutionEnded();
+//   debugger->notifyExecutionEnded();
 //
 // The VM thread blocks inside the debug hook whenever the client stops at
 // a breakpoint/step, while background threads serve the DAP connection.
