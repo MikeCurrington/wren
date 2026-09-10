@@ -35,51 +35,49 @@ namespace debug
   {
     public:
       Debugger();
-      ~Debugger();
+      virtual ~Debugger();
 
       Debugger(const Debugger&) = delete;
       Debugger& operator=(const Debugger&) = delete;
 
       // Starts listening on 127.0.0.1:[port] and installs the VM debug hook.
       // Returns false if the socket could not be bound.
-      bool attach(WrenVM* vm, int port);
+      virtual bool attach(WrenVM* vm, int port) = 0;
 
       // Removes the debug hook and stops serving. Must not be called from a
       // different thread while the VM is paused inside the debug hook; call
       // it after wrenInterpret()/wrenCall() has returned.
-      void detach();
+      virtual void detach() = 0;
 
       // Tells the debugger that Wren module [module] was loaded from [path].
       // Used to translate between DAP source paths and Wren module names, in
       // both directions. Call this as modules are loaded.
-      void registerModulePath(const std::string& module,
-                              const std::string& path);
+      virtual void registerModulePath(const std::string& module,
+                                      const std::string& path) = 0;
 
       // Blocks until a client has connected and sent its initial
       // configuration (breakpoints and so on), or until [timeoutMs] elapses
       // (pass a negative value to wait indefinitely). Hosts that want
       // "debug from the first line" behavior call this before running any
       // code. Returns true if the client finished configuring.
-      bool waitForConfiguration(int timeoutMs);
+      virtual bool waitForConfiguration(int timeoutMs) = 0;
 
       // The host must call this when the interpreter returns so that the
       // client learns the debuggee finished.
-      void notifyExecutionEnded();
+      virtual void notifyExecutionEnded() = 0;
 
       // Whether the first line of executed code stops the VM ("entry" stop).
       // On by default when the host waits for configuration before starting.
       // May also be set by clients through their launch configuration.
-      void setStopOnEntry(bool stopOnEntry);
+      virtual void setStopOnEntry(bool stopOnEntry) = 0;
 
       // Sends [text] to the client's debug console as a stdout "output"
       // event. Hosts call this from their writeFn so System.print() shows up
       // in VS Code.
-      void writeOutput(const std::string& text);
-
-    private:
-      struct Impl;
-      std::unique_ptr<Impl> impl_;
+      virtual void writeOutput(const std::string& text) = 0;
   };
+
+  std::unique_ptr<Debugger> MakeDebugger();
 }
 }
 

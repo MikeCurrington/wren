@@ -129,7 +129,7 @@ namespace debug
   // All debugger state and behavior. The public header exposes only an
   // opaque impl pointer so that hosts including wren_debugger.h don't pull
   // in any DAP or VM internals.
-  struct Debugger::Impl
+  struct DebuggerImpl : public Debugger
   {
     // How the VM should run after the client resumes it.
     enum class StepMode
@@ -165,17 +165,18 @@ namespace debug
       WrenHandle* value = nullptr;   // for container kinds
     };
 
-    Impl() = default;
+    DebuggerImpl() = default;
+    ~DebuggerImpl();
 
     // ---- lifecycle (called by the public forwarding methods) ----
-    bool attach(WrenVM* vm, int port);
-    void detach();
+    bool attach(WrenVM* vm, int port) override;
+    void detach() override;
     void registerModulePath(const std::string& module,
-                            const std::string& path);
-    bool waitForConfiguration(int timeoutMs);
-    void notifyExecutionEnded();
-    void setStopOnEntry(bool stopOnEntry);
-    void writeOutput(const std::string& text);
+                            const std::string& path) override;
+    bool waitForConfiguration(int timeoutMs) override;
+    void notifyExecutionEnded() override;
+    void setStopOnEntry(bool stopOnEntry) override;
+    void writeOutput(const std::string& text) override;
 
     // ---- runs on the VM thread ----
     static void hookThunk(WrenVM* vm, WrenDebugEvent event, void* userData);
@@ -237,55 +238,22 @@ namespace debug
   };
 
   Debugger::Debugger()
-    : impl_(new Impl())
   {}
 
   Debugger::~Debugger()
   {
-    detach();
-  }
-
-  bool Debugger::attach(WrenVM* vm, int port)
-  {
-    return impl_->attach(vm, port);
-  }
-
-  void Debugger::detach()
-  {
-    impl_->detach();
-  }
-
-  void Debugger::registerModulePath(const std::string& module,
-                                    const std::string& path)
-  {
-    impl_->registerModulePath(module, path);
-  }
-
-  bool Debugger::waitForConfiguration(int timeoutMs)
-  {
-    return impl_->waitForConfiguration(timeoutMs);
-  }
-
-  void Debugger::notifyExecutionEnded()
-  {
-    impl_->notifyExecutionEnded();
-  }
-
-  void Debugger::setStopOnEntry(bool stopOnEntry)
-  {
-    impl_->setStopOnEntry(stopOnEntry);
-  }
-
-  void Debugger::writeOutput(const std::string& text)
-  {
-    impl_->writeOutput(text);
   }
 
   // ---------------------------------------------------------------------------
   // Impl: lifecycle
   // ---------------------------------------------------------------------------
 
-  bool Debugger::Impl::attach(WrenVM* vm, int port)
+  DebuggerImpl::~DebuggerImpl()
+  {
+    detach();
+  }
+
+  bool DebuggerImpl::attach(WrenVM* vm, int port)
   {
     if (!connection_.listen(port)) return false;
 
@@ -299,7 +267,7 @@ namespace debug
     return true;
   }
 
-  void Debugger::Impl::detach()
+  void DebuggerImpl::detach()
   {
     if (vm_ != nullptr)
     {
@@ -321,7 +289,7 @@ namespace debug
     connection_.stop();
   }
 
-  void Debugger::Impl::registerModulePath(const std::string& module,
+  void DebuggerImpl::registerModulePath(const std::string& module,
                                           const std::string& path)
   {
     std::unique_lock<std::mutex> lock(mutex_);
@@ -329,7 +297,7 @@ namespace debug
     pathToModule_[path] = module;
   }
 
-  bool Debugger::Impl::waitForConfiguration(int timeoutMs)
+  bool DebuggerImpl::waitForConfiguration(int timeoutMs)
   {
     std::unique_lock<std::mutex> lock(mutex_);
     stopOnEntry_ = true;
@@ -346,7 +314,7 @@ namespace debug
     return configured && configurationDone_;
   }
 
-  void Debugger::Impl::notifyExecutionEnded()
+  void DebuggerImpl::notifyExecutionEnded()
   {
     if (!connection_.isConnected()) return;
 
@@ -356,13 +324,13 @@ namespace debug
     sendEvent("terminated", Json::object());
   }
 
-  void Debugger::Impl::setStopOnEntry(bool stopOnEntry)
+  void DebuggerImpl::setStopOnEntry(bool stopOnEntry)
   {
     std::unique_lock<std::mutex> lock(mutex_);
     stopOnEntry_ = stopOnEntry;
   }
 
-  void Debugger::Impl::writeOutput(const std::string& text)
+  void DebuggerImpl::writeOutput(const std::string& text)
   {
     if (!connection_.isConnected()) return;
 
@@ -376,13 +344,13 @@ namespace debug
   // VM thread: the debug hook
   // ---------------------------------------------------------------------------
 
-  void Debugger::Impl::hookThunk(WrenVM* vm, WrenDebugEvent event,
+  void DebuggerImpl::hookThunk(WrenVM* vm, WrenDebugEvent event,
                                  void* userData)
   {
-    static_cast<Impl*>(userData)->onLineEvent();
+    static_cast<DebuggerImpl*>(userData)->onLineEvent();
   }
 
-  void Debugger::Impl::onLineEvent()
+  void DebuggerImpl::onLineEvent()
   {
     // Decide whether to stop on this line. The decision reads and updates
     // state guarded by [mutex_]; the VM's own state is stable because the
@@ -433,7 +401,7 @@ namespace debug
     pauseLoop();
   }
 
-  bool Debugger::Impl::isBreakpointAt(const WrenDebugFrameInfo& info)
+  bool DebuggerImpl::isBreakpointAt(const WrenDebugFrameInfo& info)
   {
     auto moduleBreakpoints = breakpoints_.find(info.module);
     if (moduleBreakpoints == breakpoints_.end()) return false;
@@ -443,7 +411,7 @@ namespace debug
   // Blocks the VM thread while the client inspects the paused program. DAP
   // requests that need live VM state are dequeued and answered here; the
   // loop ends when the client resumes execution.
-  void Debugger::Impl::pauseLoop()
+  void DebuggerImpl::pauseLoop()
   {
     {
       std::unique_lock<std::mutex> lock(mutex_);
@@ -476,7 +444,7 @@ namespace debug
     }
   }
 
-  void Debugger::Impl::runVmRequest(const VmRequest& request)
+  void DebuggerImpl::runVmRequest(const VmRequest& request)
   {
     const std::string command = request.request.getString("command");
     const Json* arguments = request.request.find("arguments");
@@ -510,7 +478,7 @@ namespace debug
   // Paused-state queries (VM thread, VM suspended in the hook)
   // ---------------------------------------------------------------------------
 
-  Json Debugger::Impl::buildStackFrames()
+  Json DebuggerImpl::buildStackFrames()
   {
     Json frames = Json::array();
 
@@ -569,7 +537,7 @@ namespace debug
     return body;
   }
 
-  int Debugger::Impl::makeVariableRef(VariableRef::Kind kind, int frame,
+  int DebuggerImpl::makeVariableRef(VariableRef::Kind kind, int frame,
                                       WrenHandle* value)
   {
     int reference = nextVariableRef_++;
@@ -580,7 +548,7 @@ namespace debug
     return reference;
   }
 
-  void Debugger::Impl::clearVariableRefs()
+  void DebuggerImpl::clearVariableRefs()
   {
     for (auto& entry : variableRefs_)
     {
@@ -593,7 +561,7 @@ namespace debug
     sourceReferences_.clear();
   }
 
-  Json Debugger::Impl::buildScopes(int frame)
+  Json DebuggerImpl::buildScopes(int frame)
   {
     Json scopes = Json::array();
 
@@ -630,7 +598,7 @@ namespace debug
     return body;
   }
 
-  Json Debugger::Impl::buildVariables(int reference)
+  Json DebuggerImpl::buildVariables(int reference)
   {
     Json variables = Json::array();
     wrenEnsureSlots(vm_, 4);
@@ -749,7 +717,7 @@ namespace debug
     return body;
   }
 
-  void Debugger::Impl::setSlotFromRef(const VariableRef& ref, int slot)
+  void DebuggerImpl::setSlotFromRef(const VariableRef& ref, int slot)
   {
     wrenEnsureSlots(vm_, slot + 1);
     wrenSetSlotHandle(vm_, slot, ref.value);
@@ -759,7 +727,7 @@ namespace debug
   // DAP thread: request handling
   // ---------------------------------------------------------------------------
 
-  void Debugger::Impl::handleMessage(Json message)
+  void DebuggerImpl::handleMessage(Json message)
   {
     if (message.getString("type") != "request") return;
     const std::string command = message.getString("command");
@@ -974,7 +942,7 @@ namespace debug
     sendErrorResponse(message, "Unknown command '" + command + "'");
   }
 
-  std::string Debugger::Impl::moduleForPath(const std::string& path)
+  std::string DebuggerImpl::moduleForPath(const std::string& path)
   {
     std::unique_lock<std::mutex> lock(mutex_);
 
@@ -991,7 +959,7 @@ namespace debug
     return "";
   }
 
-  void Debugger::Impl::resume(StepMode mode)
+  void DebuggerImpl::resume(StepMode mode)
   {
     std::unique_lock<std::mutex> lock(mutex_);
     if (!paused_) return;
@@ -1008,13 +976,13 @@ namespace debug
   // Message plumbing (either thread)
   // ---------------------------------------------------------------------------
 
-  void Debugger::Impl::send(Json message)
+  void DebuggerImpl::send(Json message)
   {
     message.set("seq", Json::integer(sequence_.fetch_add(1)));
     connection_.send(message);
   }
 
-  void Debugger::Impl::sendResponse(const Json& request, Json body)
+  void DebuggerImpl::sendResponse(const Json& request, Json body)
   {
     Json response = Json::object();
     response.set("type", Json::string("response"));
@@ -1025,7 +993,7 @@ namespace debug
     send(std::move(response));
   }
 
-  void Debugger::Impl::sendErrorResponse(const Json& request,
+  void DebuggerImpl::sendErrorResponse(const Json& request,
                                          const std::string& message)
   {
     Json response = Json::object();
@@ -1037,13 +1005,18 @@ namespace debug
     send(std::move(response));
   }
 
-  void Debugger::Impl::sendEvent(const std::string& event, Json body)
+  void DebuggerImpl::sendEvent(const std::string& event, Json body)
   {
     Json message = Json::object();
     message.set("type", Json::string("event"));
     message.set("event", Json::string(event));
     message.set("body", std::move(body));
     send(std::move(message));
+  }
+
+  std::unique_ptr<Debugger> MakeDebugger()
+  {
+    return std::make_unique<DebuggerImpl>();
   }
 }
 }

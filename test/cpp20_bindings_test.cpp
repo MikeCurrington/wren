@@ -7,6 +7,7 @@
 #include "../src/include/wren.hpp"
 
 #ifdef WREN_ENABLE_DEBUGGER
+#include "../src/include/wren_debugger.h"
 #include <cstring>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -558,17 +559,21 @@ System.print("fresh counter: %(fresh.counter)")
   printf("\n");
 
 #ifdef WREN_ENABLE_DEBUGGER
-  // Test 14: Config::debug spins up a DAP debugger for this VM
+  // Test 14: a host-created DAP debugger attaches to this VM
   {
-    printf("Test 14: debugger enabled through VM::Config\n");
+    printf("Test 14: debugger attached through MakeDebugger/setDebugger\n");
 
     const int debugPort = 47129;
     wren::VM::Config debugConfig;
-    debugConfig.debug = true;
     debugConfig.debugPort = debugPort;
     wren::VM debugVm(std::move(debugConfig));
 
-    TEST_ASSERT(debugVm.debugger() != nullptr, "debugger attached when enabled");
+    // The host creates the debugger and hands it to the VM; the VM no
+    // longer spins one up itself from Config.
+    auto debugger = wren::debug::MakeDebugger();
+    TEST_ASSERT(debugger != nullptr, "MakeDebugger returns a debugger");
+    TEST_ASSERT(debugger->attach(debugVm.raw(), debugPort), "debugger attach listens");
+    debugVm.setDebugger(std::move(debugger));
 
     // Something must actually be serving on the port.
     int sock = socket(AF_INET, SOCK_STREAM, 0);
