@@ -665,7 +665,11 @@ WREN_API void wrenSetUserData(WrenVM* vm, void* userData);
 // The inspection functions below may only be called from within the debug
 // hook (or from a foreign method), since they read the state of the currently
 // executing fiber. Frames are numbered from the innermost (most recently
-// called) frame, which is frame 0.
+// called) frame of the running fiber, which is frame 0, followed by the rest
+// of that fiber's frames, then the frames of each fiber that resumed it via
+// Fiber.call() (or try()), up to the root fiber. Fiber.transfer() does not
+// record a link back, so frames of a fiber that resumed another by transfer
+// are not visible.
 
 // Installs [fn] as the VM's debug hook, passing [userData] to it. Passing NULL
 // for [fn] removes the current hook. There is at most one hook per VM.

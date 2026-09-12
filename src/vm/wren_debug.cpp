@@ -433,24 +433,44 @@ void wrenSetDebugHook(WrenVM* vm, WrenDebugHookFn fn, void* userData)
   vm->debugHookData = userData;
 }
 
-// Returns the call frame numbered the way the public debug API exposes frames:
-// innermost frame is 0. Returns NULL if [index] is out of range.
-static CallFrame* debugGetFrame(WrenVM* vm, int index)
+// Returns the call frame numbered the way the public debug API exposes
+// frames: innermost frame is 0, followed by the rest of the running fiber's
+// frames, then the frames of each fiber that resumed it via Fiber.call(),
+// up to the root fiber. Returns NULL if [index] is out of range.
+//
+// If [owner] is not NULL, receives the fiber that owns the returned frame.
+static CallFrame* debugGetFrame(WrenVM* vm, int index, ObjFiber** owner)
 {
   if (vm->fiber == nullptr) return nullptr;
-  if (index < 0 || index >= vm->fiber->numFrames) return nullptr;
-  return &vm->fiber->frames[vm->fiber->numFrames - 1 - index];
+  if (index < 0) return nullptr;
+
+  ObjFiber* fiber = vm->fiber;
+  while (fiber != nullptr)
+  {
+    if (index < fiber->numFrames)
+    {
+      if (owner != nullptr) *owner = fiber;
+      return &fiber->frames[fiber->numFrames - 1 - index];
+    }
+    index -= fiber->numFrames;
+    fiber = fiber->caller;
+  }
+  return nullptr;
 }
 
 int wrenDebugGetFrameCount(WrenVM* vm)
 {
-  if (vm->fiber == nullptr) return 0;
-  return vm->fiber->numFrames;
+  int count = 0;
+  for (ObjFiber* fiber = vm->fiber; fiber != nullptr; fiber = fiber->caller)
+  {
+    count += fiber->numFrames;
+  }
+  return count;
 }
 
 bool wrenDebugGetFrameInfo(WrenVM* vm, int frame, WrenDebugFrameInfo* info)
 {
-  CallFrame* callFrame = debugGetFrame(vm, frame);
+  CallFrame* callFrame = debugGetFrame(vm, frame, nullptr);
   if (callFrame == nullptr || info == nullptr) return false;
 
   ObjFn* fn = callFrame->closure->fn;
@@ -480,39 +500,43 @@ bool wrenDebugGetFrameInfo(WrenVM* vm, int frame, WrenDebugFrameInfo* info)
   return true;
 }
 
-// Returns a pointer one past the last stack slot used by the frame at
-// [frameIndex] (which indexes from the bottom of the call stack, unlike the
-// public API).
-static Value* debugFrameLocalEnd(WrenVM* vm, ObjFiber* fiber, int frameIndex)
+// Returns a pointer one past the last stack slot used by [callFrame] in
+// [fiber]. The fiber's innermost frame's slots end at the fiber's stack top
+// -- except for the running fiber while the debug hook's own API slots are
+// wired up, which temporarily extends it. A suspended fiber keeps its saved
+// stack top, which is what makes its locals introspectable while paused.
+static Value* debugFrameLocalEnd(WrenVM* vm, ObjFiber* fiber,
+                                 CallFrame* callFrame)
 {
-  // The innermost frame's slots end at the stack top -- except while the
-  // debug hook's own API slots are wired up, which temporarily extend it.
-  if (frameIndex == fiber->numFrames - 1)
+  if (callFrame == &fiber->frames[fiber->numFrames - 1])
   {
-    if (vm->debugSavedStackTop != nullptr) return vm->debugSavedStackTop;
+    if (fiber == vm->fiber && vm->debugSavedStackTop != nullptr)
+    {
+      return vm->debugSavedStackTop;
+    }
     return fiber->stackTop;
   }
 
-  return fiber->frames[frameIndex + 1].stackStart;
+  return callFrame[1].stackStart;
 }
 
 int wrenDebugGetLocalCount(WrenVM* vm, int frame)
 {
-  CallFrame* callFrame = debugGetFrame(vm, frame);
+  ObjFiber* owner = nullptr;
+  CallFrame* callFrame = debugGetFrame(vm, frame, &owner);
   if (callFrame == nullptr) return 0;
 
-  Value* end = debugFrameLocalEnd(vm, vm->fiber,
-                                  vm->fiber->numFrames - 1 - frame);
+  Value* end = debugFrameLocalEnd(vm, owner, callFrame);
   return (int)(end - callFrame->stackStart);
 }
 
 void wrenDebugGetLocal(WrenVM* vm, int frame, int index, int slot)
 {
-  CallFrame* callFrame = debugGetFrame(vm, frame);
+  ObjFiber* owner = nullptr;
+  CallFrame* callFrame = debugGetFrame(vm, frame, &owner);
   ASSERT(callFrame != nullptr, "Frame index out of range.");
 
-  Value* end = debugFrameLocalEnd(vm, vm->fiber,
-                                  vm->fiber->numFrames - 1 - frame);
+  Value* end = debugFrameLocalEnd(vm, owner, callFrame);
   ASSERT(index >= 0 && callFrame->stackStart + index < end,
          "Local index out of range.");
   ASSERT(slot >= 0 && slot < wrenGetSlotCount(vm), "Not that many slots.");
@@ -522,7 +546,7 @@ void wrenDebugGetLocal(WrenVM* vm, int frame, int index, int slot)
 
 const char* wrenDebugGetLocalName(WrenVM* vm, int frame, int index)
 {
-  CallFrame* callFrame = debugGetFrame(vm, frame);
+  CallFrame* callFrame = debugGetFrame(vm, frame, nullptr);
   if (callFrame == nullptr || index < 0) return nullptr;
 
   ObjFn* fn = callFrame->closure->fn;
@@ -549,7 +573,7 @@ const char* wrenDebugGetLocalName(WrenVM* vm, int frame, int index)
 // the way the public debug API exposes frames.
 static ObjModule* debugGetFrameModule(WrenVM* vm, int frame)
 {
-  CallFrame* callFrame = debugGetFrame(vm, frame);
+  CallFrame* callFrame = debugGetFrame(vm, frame, nullptr);
   if (callFrame == nullptr) return nullptr;
   return callFrame->closure->fn->module;
 }

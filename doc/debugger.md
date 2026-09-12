@@ -129,5 +129,8 @@ Inside the hook, the standard slot API (`wrenEnsureSlots`, `wrenGetSlotDouble`,
   shown by slot position (`slot0`, ...) after the named locals.
 - No expression evaluation / watch / REPL while paused.
 - No conditional or exception breakpoints.
-- Fibers are treated as a single thread; only the running fiber is shown.
+- The call stack spans the running fiber and every fiber that resumed it via
+  `Fiber.call()` (or `try()`), so the resumer's frames and variables are
+  visible across a `yield`. `Fiber.transfer()` records no link back, so
+  transferred fibers show only their own frames.
 - One VM (and one DAP client) per `Debugger` instance.
