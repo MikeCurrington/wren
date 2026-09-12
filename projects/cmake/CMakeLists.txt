@@ -70,6 +70,11 @@ if (WREN_DEBUGGER AND WREN_BUILD_STATIC)
     target_compile_features(wren_debugger PUBLIC cxx_std_20)
     target_link_libraries(wren_debugger PUBLIC wren)
 
+    if (WIN32)
+        # Winsock, needed by the DAP socket layer on Windows.
+        target_link_libraries(wren_debugger PUBLIC ws2_32)
+    endif()
+
     if (WREN_BUILD_TEST)
         # A tiny standalone host so the debugger can be exercised without an
         # embedding application.

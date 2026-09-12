@@ -2,6 +2,21 @@
 #ifndef dap_io_h
 #define dap_io_h
 
+// The DAP wire format needs raw TCP sockets, which live in different
+// headers with a slightly different API on Windows than on POSIX.
+#ifdef _WIN32
+  #ifndef WIN32_LEAN_AND_MEAN
+    #define WIN32_LEAN_AND_MEAN
+  #endif
+  #include <winsock2.h>
+  #include <ws2tcpip.h>
+#else
+  #include <arpa/inet.h>
+  #include <netinet/in.h>
+  #include <sys/socket.h>
+  #include <unistd.h>
+#endif
+
 #include <functional>
 #include <mutex>
 #include <string>
@@ -13,6 +28,20 @@ namespace wren
 {
 namespace debug
 {
+#ifdef _WIN32
+  using SocketFd = SOCKET;
+  constexpr SocketFd kInvalidSocket = INVALID_SOCKET;
+  using SocketResult = int;
+  constexpr int kShutdownBoth = SD_BOTH;
+  inline void closeSocket(SocketFd socket) { closesocket(socket); }
+#else
+  using SocketFd = int;
+  constexpr SocketFd kInvalidSocket = -1;
+  using SocketResult = ssize_t;
+  constexpr int kShutdownBoth = SHUT_RDWR;
+  inline void closeSocket(SocketFd socket) { ::close(socket); }
+#endif
+
   // Accepts one debug adapter client at a time and exchanges Debug Adapter
   // Protocol messages with it over TCP, using the standard
   // "Content-Length: N\r\n\r\n" framing that DAP shares with LSP.
@@ -60,16 +89,22 @@ namespace debug
 
     private:
       void acceptLoop();
-      void receiveLoop(int socket);
-      bool sendAll(int socket, const char* data, size_t length);
+      void receiveLoop(SocketFd socket);
+      bool sendAll(SocketFd socket, const char* data, size_t length);
 
-      int listenSocket_ = -1;
-      int clientSocket_ = -1;
+      SocketFd listenSocket_ = kInvalidSocket;
+      SocketFd clientSocket_ = kInvalidSocket;
       std::thread acceptThread_;
       std::thread receiveThread_;
       std::mutex mutex_;
       MessageCallback onMessage_;
       bool stopping_ = false;
+#ifdef _WIN32
+      // Winsock must be initialized before the first socket call; WSAStartup
+      // and WSACleanup are reference counted, so a started/cleanup pair per
+      // connection is safe even with several instances alive.
+      bool wsaInitialized_ = false;
+#endif
   };
 }
 }

@@ -1,10 +1,5 @@
 #include "dap_io.h"
 
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
-
 #include <cstdlib>
 #include <cstring>
 #include <vector>
@@ -20,8 +15,17 @@ namespace debug
 
   bool DapConnection::listen(int port)
   {
+#ifdef _WIN32
+    if (!wsaInitialized_)
+    {
+      WSADATA wsaData;
+      if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) return false;
+      wsaInitialized_ = true;
+    }
+#endif
+
     listenSocket_ = ::socket(AF_INET, SOCK_STREAM, 0);
-    if (listenSocket_ < 0) return false;
+    if (listenSocket_ == kInvalidSocket) return false;
 
     int reuse = 1;
     setsockopt(listenSocket_, SOL_SOCKET, SO_REUSEADDR,
@@ -37,8 +41,8 @@ namespace debug
                sizeof(address)) < 0 ||
         ::listen(listenSocket_, 1) < 0)
     {
-      ::close(listenSocket_);
-      listenSocket_ = -1;
+      closeSocket(listenSocket_);
+      listenSocket_ = kInvalidSocket;
       return false;
     }
 
@@ -60,8 +64,8 @@ namespace debug
         if (stopping_) return;
       }
 
-      int socket = ::accept(listenSocket_, nullptr, nullptr);
-      if (socket < 0)
+      SocketFd socket = ::accept(listenSocket_, nullptr, nullptr);
+      if (socket == kInvalidSocket)
       {
         std::unique_lock<std::mutex> lock(mutex_);
         if (stopping_) return;
@@ -73,14 +77,14 @@ namespace debug
         if (stopping_)
         {
           lock.unlock();
-          ::close(socket);
+          closeSocket(socket);
           return;
         }
         // If a client is already debugging, drop the new connection.
-        if (clientSocket_ != -1)
+        if (clientSocket_ != kInvalidSocket)
         {
           lock.unlock();
-          ::close(socket);
+          closeSocket(socket);
           continue;
         }
         clientSocket_ = socket;
@@ -91,7 +95,7 @@ namespace debug
     }
   }
 
-  void DapConnection::receiveLoop(int socket)
+  void DapConnection::receiveLoop(SocketFd socket)
   {
     // Bytes read from the socket that haven't been consumed by a message
     // yet. DAP frames arrive as "Content-Length: N\r\n" headers, a blank
@@ -101,7 +105,8 @@ namespace debug
 
     for (;;)
     {
-      ssize_t read = ::recv(socket, chunk, sizeof(chunk), 0);
+      SocketResult read = ::recv(socket, chunk,
+                                 static_cast<int>(sizeof(chunk)), 0);
       if (read <= 0) break;
       buffer.insert(buffer.end(), chunk, chunk + read);
 
@@ -168,16 +173,17 @@ namespace debug
     // The client went away. Release it so the accept loop can take the next
     // connection.
     std::unique_lock<std::mutex> lock(mutex_);
-    if (clientSocket_ == socket) clientSocket_ = -1;
-    ::close(socket);
+    if (clientSocket_ == socket) clientSocket_ = kInvalidSocket;
+    closeSocket(socket);
   }
 
-  bool DapConnection::sendAll(int socket, const char* data, size_t length)
+  bool DapConnection::sendAll(SocketFd socket, const char* data, size_t length)
   {
     size_t sent = 0;
     while (sent < length)
     {
-      ssize_t result = ::send(socket, data + sent, length - sent, 0);
+      SocketResult result = ::send(socket, data + sent,
+                                   static_cast<int>(length - sent), 0);
       if (result <= 0) return false;
       sent += static_cast<size_t>(result);
     }
@@ -191,7 +197,7 @@ namespace debug
         std::to_string(payload.size()) + "\r\n\r\n" + payload;
 
     std::unique_lock<std::mutex> lock(mutex_);
-    if (clientSocket_ != -1)
+    if (clientSocket_ != kInvalidSocket)
     {
       // The mutex keeps concurrent sends from interleaving frames. If the
       // send fails the receive loop will notice the disconnect.
@@ -202,17 +208,17 @@ namespace debug
   bool DapConnection::isConnected()
   {
     std::unique_lock<std::mutex> lock(mutex_);
-    return clientSocket_ != -1;
+    return clientSocket_ != kInvalidSocket;
   }
 
   void DapConnection::disconnectClient()
   {
     std::unique_lock<std::mutex> lock(mutex_);
-    if (clientSocket_ != -1)
+    if (clientSocket_ != kInvalidSocket)
     {
       // Only shut the socket down: closing it here would race the receive
       // loop, which closes it when it exits.
-      ::shutdown(clientSocket_, SHUT_RDWR);
+      ::shutdown(clientSocket_, kShutdownBoth);
     }
   }
 
@@ -221,28 +227,36 @@ namespace debug
     {
       std::unique_lock<std::mutex> lock(mutex_);
       stopping_ = true;
-      if (clientSocket_ != -1)
+      if (clientSocket_ != kInvalidSocket)
       {
-        ::shutdown(clientSocket_, SHUT_RDWR);
+        ::shutdown(clientSocket_, kShutdownBoth);
       }
     }
 
-    if (listenSocket_ != -1)
+    if (listenSocket_ != kInvalidSocket)
     {
-      ::shutdown(listenSocket_, SHUT_RDWR);
-      ::close(listenSocket_);
-      listenSocket_ = -1;
+      ::shutdown(listenSocket_, kShutdownBoth);
+      closeSocket(listenSocket_);
+      listenSocket_ = kInvalidSocket;
     }
 
     if (acceptThread_.joinable()) acceptThread_.join();
     if (receiveThread_.joinable()) receiveThread_.join();
 
     std::unique_lock<std::mutex> lock(mutex_);
-    if (clientSocket_ != -1)
+    if (clientSocket_ != kInvalidSocket)
     {
-      ::close(clientSocket_);
-      clientSocket_ = -1;
+      closeSocket(clientSocket_);
+      clientSocket_ = kInvalidSocket;
     }
+
+#ifdef _WIN32
+    if (wsaInitialized_)
+    {
+      WSACleanup();
+      wsaInitialized_ = false;
+    }
+#endif
   }
 }
 }
