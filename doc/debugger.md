@@ -126,7 +126,11 @@ Inside the hook, the standard slot API (`wrenEnsureSlots`, `wrenGetSlotDouble`,
 ## Current limitations
 
 - Locals that are expression temporaries or out of scope have no name and are
-  shown by slot position (`slot0`, ...) after the named locals.
+  shown by slot position (`slot0`, ...) after the named locals. Instance
+  fields of classes the VM compiled are shown by name; other classes fall
+  back to `field0`, .... Field names are matched by class name, so two
+  different modules defining the same class name show the last-defined
+  names.
 - No expression evaluation / watch / REPL while paused.
 - No conditional or exception breakpoints.
 - The call stack spans the running fiber and every fiber that resumed it via

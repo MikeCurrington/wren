@@ -1,6 +1,67 @@
 #include <stdio.h>
 
+#include <map>
+#include <string>
+#include <vector>
+
 #include "wren_debug.h"
+
+// ---------------------------------------------------------------------------
+// Class field names
+// ---------------------------------------------------------------------------
+
+// Field names are not retained on classes at runtime: the compiler keeps a
+// field symbol table only while compiling a class body. The compiler records
+// each class definition's names here so the debugger can label instance
+// fields. Entries are keyed by VM and class name; only the fields declared by
+// a class's own body are stored, since a class's own fields start after its
+// superclass's (see wrenBindSuperclass()). Accessed only from the VM thread.
+namespace
+{
+  std::map<WrenVM*, std::map<std::string, std::vector<std::string>>>&
+  classFieldNames()
+  {
+    static std::map<WrenVM*, std::map<std::string, std::vector<std::string>>>
+        registry;
+    return registry;
+  }
+}
+
+void wrenDebugRecordClassFields(WrenVM* vm, const char* className,
+                                const SymbolTable* names)
+{
+  auto& entry = classFieldNames()[vm][className];
+  entry.clear();
+  for (int i = 0; i < names->count; i++)
+  {
+    entry.push_back(names->data[i]->value);
+  }
+}
+
+const char* wrenDebugGetFieldName(WrenVM* vm, ObjClass* classObj, int index)
+{
+  if (classObj == nullptr || index < 0) return nullptr;
+
+  // Own fields come after the superclass's fields.
+  int base = classObj->superclass != nullptr ? classObj->superclass->numFields
+                                             : 0;
+  if (index < base) return wrenDebugGetFieldName(vm, classObj->superclass, index);
+
+  auto vmIt = classFieldNames().find(vm);
+  if (vmIt == classFieldNames().end()) return nullptr;
+
+  auto classIt = vmIt->second.find(classObj->name->value);
+  if (classIt == vmIt->second.end()) return nullptr;
+
+  int own = index - base;
+  if (own >= static_cast<int>(classIt->second.size())) return nullptr;
+  return classIt->second[own].c_str();
+}
+
+void wrenDebugClearClassFields(WrenVM* vm)
+{
+  classFieldNames().erase(vm);
+}
 
 void wrenDebugPrintStackTrace(WrenVM* vm)
 {

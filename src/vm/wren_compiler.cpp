@@ -4,6 +4,7 @@
 
 #include "wren_common.h"
 #include "wren_compiler.h"
+#include "wren_debug.h"
 #include "wren_vm.h"
 
 #if WREN_DEBUG_DUMP_COMPILED_CODE
@@ -3657,7 +3658,14 @@ static void classDefinition(Compiler* compiler, bool isForeign)
     compiler->fn->code.data[numFieldsInstruction] =
         (uint8_t)classInfo.fields.count;
   }
-  
+
+  // Remember the field names for the debugger.
+  if (!isForeign && classInfo.fields.count > 0)
+  {
+    wrenDebugRecordClassFields(compiler->parser->vm, className->value,
+                               &classInfo.fields);
+  }
+
   // Clear symbol tables for tracking field and method names.
   wrenSymbolTableClear(compiler->parser->vm, &classInfo.fields);
   classInfo.methods.clear(compiler->parser->vm);

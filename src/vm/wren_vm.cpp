@@ -122,6 +122,8 @@ void wrenFreeVM(WrenVM* vm)
 
   wrenSymbolTableClear(vm, &vm->methodNames);
 
+  wrenDebugClearClassFields(vm);
+
   DEALLOCATE(vm, vm);
 }
 

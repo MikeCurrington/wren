@@ -16,6 +16,7 @@
 
 // The debugger reads live VM state directly, exactly like the VM's own stack
 // trace printer does.
+#include "wren_debug.h"
 #include "wren_vm.h"
 
 namespace wren
@@ -754,7 +755,11 @@ namespace debug
           ObjInstance* instance = (ObjInstance*)obj;
           for (int i = 0; i < obj->classObj->numFields; i++)
           {
-            appendVariable("field" + std::to_string(i), instance->fields[i]);
+            const char* name = wrenDebugGetFieldName(vm_, obj->classObj, i);
+            appendVariable(name != nullptr
+                ? std::string(name)
+                : "field" + std::to_string(i),
+                instance->fields[i]);
           }
           break;
         }
