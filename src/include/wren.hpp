@@ -781,6 +781,10 @@ public:
     vm_ = wrenNewVM(&config_.wrenConfig);
   }
   ~VM() {
+    // The debugger keeps WrenHandles alive and installs a debug hook, so it
+    // must detach while the VM is still valid. Members die after this body,
+    // so reset it here rather than relying on destruction order.
+    debugger_.reset();
     if (vm_) wrenFreeVM(vm_);
   }
   VM(const VM&) = delete;
