@@ -17,6 +17,7 @@
   #include <unistd.h>
 #endif
 
+#include <cstdint>
 #include <functional>
 #include <mutex>
 #include <string>

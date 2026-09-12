@@ -28,8 +28,11 @@ namespace debug
     if (listenSocket_ == kInvalidSocket) return false;
 
     int reuse = 1;
+    // Winsock's optval is const char*, POSIX takes const void*; the cast
+    // through char* is valid on both.
     setsockopt(listenSocket_, SOL_SOCKET, SO_REUSEADDR,
-               &reuse, sizeof(reuse));
+               reinterpret_cast<const char*>(&reuse),
+               static_cast<int>(sizeof(reuse)));
 
     sockaddr_in address;
     memset(&address, 0, sizeof(address));
