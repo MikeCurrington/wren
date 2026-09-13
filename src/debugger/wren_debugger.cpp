@@ -295,8 +295,11 @@ namespace debug
     if (!connection_.listen(port)) return false;
 
     // Sends happen over a socket the client may drop at any moment; a dead
-    // peer must not take the host application down with SIGPIPE.
+    // peer must not take the host application down with SIGPIPE. Windows
+    // has no SIGPIPE: failed sends are reported as socket errors instead.
+#ifdef SIGPIPE
     signal(SIGPIPE, SIG_IGN);
+#endif
 
     vm_ = vm;
     wrenSetDebugHook(vm, hookThunk, this);
