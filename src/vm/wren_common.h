@@ -161,7 +161,9 @@
 // assertion fails, there is a bug in Wren.
 //
 // Assertions add significant overhead, so are only enabled in debug builds.
-#ifdef DEBUG
+// Accept either DEBUG or the MSVC-convention _DEBUG, since CMake defines
+// neither of them by itself for debug configurations.
+#if defined(DEBUG) || defined(_DEBUG)
 
   #include <stdio.h>
 

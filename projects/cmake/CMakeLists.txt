@@ -44,6 +44,11 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Enable Wren's ASSERT/UNREACHABLE in debug builds: wren_common.h gates them
+# on DEBUG or _DEBUG, neither of which CMake defines by itself.
+set(CMAKE_C_FLAGS_DEBUG   "${CMAKE_C_FLAGS_DEBUG}   -D_DEBUG")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -D_DEBUG")
+
 # Wren Libraries
 if (WREN_BUILD_STATIC)
     add_library(wren STATIC ${WREN_SRC_FILES})
