@@ -2,8 +2,11 @@
 #ifndef wren_debugger_h
 #define wren_debugger_h
 
+#include <functional>
 #include <memory>
 #include <string>
+#include <typeinfo>
+#include <vector>
 
 #include "wren.h"
 
@@ -31,6 +34,45 @@ namespace wren
 {
 namespace debug
 {
+  // Identifies one inspectable foreign (C++-backed) value. For a Wren
+  // foreign instance the debugger fills [data] with the instance's opaque
+  // data bytes and leaves [tag] null; the host's provider unwraps them. For
+  // nested values the provider passes back the data/tag/keepAlive it handed
+  // out with a child variable. [keepAlive] pins the memory the node points
+  // at for as long as the debugger holds the node.
+  struct ForeignNode
+  {
+    const void* data = nullptr;
+    const std::type_info* tag = nullptr;
+    std::shared_ptr<void> keepAlive;
+    std::string wrenClassName;  // set for Wren foreign instances
+  };
+
+  // One child variable of a foreign value, as described by the provider.
+  // A variable with non-null [data] and [tag] is itself expandable: the
+  // provider will be called again with a node built from those fields.
+  struct ForeignVariable
+  {
+    std::string name;
+    std::string value;  // display string for the value column
+    std::string type;   // DAP type column (may be empty)
+    const void* data = nullptr;
+    const std::type_info* tag = nullptr;
+    std::shared_ptr<void> keepAlive;
+  };
+
+  // Host-provided introspection for foreign values. Both functions run on
+  // the VM thread while the VM is paused, and must only read state - never
+  // run Wren code. [summarize] returns the value-column string for a foreign
+  // value, or "" when the host cannot describe that type: the debugger then
+  // falls back to "ClassName @ 0x..." and treats the value as a leaf.
+  // [children] lists the variables of an expandable foreign value.
+  struct ForeignProvider
+  {
+    std::function<std::string(const ForeignNode& node)> summarize;
+    std::function<std::vector<ForeignVariable>(const ForeignNode& node)> children;
+  };
+
   class Debugger
   {
     public:
@@ -75,6 +117,12 @@ namespace debug
       // event. Hosts call this from their writeFn so System.print() shows up
       // in VS Code.
       virtual void writeOutput(const std::string& text) = 0;
+
+      // Installs host-provided introspection for foreign values, so that
+      // variables holding foreign class instances can be summarized and
+      // expanded in the variables pane. Call once during host startup,
+      // before a client attaches.
+      virtual void setForeignProvider(ForeignProvider provider) = 0;
   };
 
   std::unique_ptr<Debugger> MakeDebugger();

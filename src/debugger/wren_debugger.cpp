@@ -194,12 +194,14 @@ namespace debug
         ModuleVariables,  // [frame]'s module's top-level variables
         List,
         Map,
-        Instance
+        Instance,
+        Foreign           // [foreign] describes the value to expand
       };
 
       Kind kind = Kind::Locals;
       int frame = 0;                 // public frame index (0 = innermost)
       WrenHandle* value = nullptr;   // for container kinds
+      ForeignNode foreign;           // for Kind::Foreign
     };
 
     DebuggerImpl() = default;
@@ -214,6 +216,7 @@ namespace debug
     void notifyExecutionEnded() override;
     void setStopOnEntry(bool stopOnEntry) override;
     void writeOutput(const std::string& text) override;
+    void setForeignProvider(ForeignProvider provider) override;
 
     // ---- runs on the VM thread ----
     static void hookThunk(WrenVM* vm, WrenDebugEvent event, void* userData);
@@ -236,13 +239,19 @@ namespace debug
     Json buildStackFrames();
     Json buildScopes(int frame);
     Json buildVariables(int reference);
-    int makeVariableRef(VariableRef::Kind kind, int frame, WrenHandle* value);
+    int makeVariableRef(VariableRef::Kind kind, int frame, WrenHandle* value,
+                        const ForeignNode* foreign = nullptr);
     void clearVariableRefs();
     void setSlotFromRef(const VariableRef& ref, int slot);
     bool isBreakpointAt(const WrenDebugFrameInfo& info);
 
     WrenVM* vm_ = nullptr;
     DapConnection connection_;
+
+    // Host-provided introspection for foreign values. Set once during host
+    // startup and only read afterwards; both functions run on the VM thread
+    // while the VM is paused.
+    ForeignProvider foreignProvider_;
 
     std::mutex mutex_;
     std::condition_variable cv_;
@@ -378,6 +387,11 @@ namespace debug
     body.set("category", Json::string("stdout"));
     body.set("output", Json::string(text));
     sendEvent("output", std::move(body));
+  }
+
+  void DebuggerImpl::setForeignProvider(ForeignProvider provider)
+  {
+    foreignProvider_ = std::move(provider);
   }
 
   // ---------------------------------------------------------------------------
@@ -578,13 +592,15 @@ namespace debug
   }
 
   int DebuggerImpl::makeVariableRef(VariableRef::Kind kind, int frame,
-                                      WrenHandle* value)
+                                      WrenHandle* value,
+                                      const ForeignNode* foreign)
   {
     int reference = nextVariableRef_++;
     VariableRef& ref = variableRefs_[reference];
     ref.kind = kind;
     ref.frame = frame;
     ref.value = value;
+    if (foreign != nullptr) ref.foreign = *foreign;
     return reference;
   }
 
@@ -660,9 +676,28 @@ namespace debug
       {
         Json variable = Json::object();
         variable.set("name", Json::string(name));
-        variable.set("value", Json::string(formatValue(value)));
         variable.set("type", Json::string(dapType(value)));
-        if (isExpandable(value))
+        variable.set("value", Json::string(formatValue(value)));
+
+        // A foreign value can be summarized and expanded by the host's
+        // provider. A non-empty summary replaces the default "ClassName @
+        // 0x..." display and marks the value expandable.
+        bool expandable = isExpandable(value);
+        if (!expandable && foreignProvider_.summarize != nullptr &&
+            IS_OBJ(value) && AS_OBJ(value)->type == OBJ_FOREIGN)
+        {
+          ForeignNode node;
+          node.data = AS_FOREIGN(value)->data;
+          node.wrenClassName = dapType(value);
+          std::string summary = foreignProvider_.summarize(node);
+          if (!summary.empty())
+          {
+            variable.set("value", Json::string(truncate(summary, kMaxValueLength)));
+            expandable = foreignProvider_.children != nullptr;
+          }
+        }
+
+        if (expandable)
         {
           vm_->apiStack[2] = value;
           WrenHandle* handle = wrenGetSlotHandle(vm_, 2);
@@ -670,6 +705,7 @@ namespace debug
           ObjType type = AS_OBJ(value)->type;
           if (type == OBJ_MAP) kind = VariableRef::Kind::Map;
           else if (type == OBJ_INSTANCE) kind = VariableRef::Kind::Instance;
+          else if (type == OBJ_FOREIGN) kind = VariableRef::Kind::Foreign;
           int childReference = makeVariableRef(kind, ref->frame, handle);
           variable.set("variablesReference", Json::integer(childReference));
         }
@@ -763,6 +799,44 @@ namespace debug
                 ? std::string(name)
                 : "field" + std::to_string(i),
                 instance->fields[i]);
+          }
+          break;
+        }
+
+        case VariableRef::Kind::Foreign:
+        {
+          // The host's provider describes the native object behind a foreign
+          // instance. Children with their own data/tag pair are expandable
+          // in turn; their keepAlive pins the native memory while the
+          // reference is alive (variableRefs_ is cleared on the next stop).
+          if (foreignProvider_.children == nullptr) break;
+          for (const ForeignVariable& child :
+              foreignProvider_.children(ref->foreign))
+          {
+            Json variable = Json::object();
+            variable.set("name", Json::string(child.name));
+            variable.set("value",
+                Json::string(truncate(child.value, kMaxValueLength)));
+            if (!child.type.empty())
+            {
+              variable.set("type", Json::string(child.type));
+            }
+            if (child.data != nullptr && child.tag != nullptr)
+            {
+              ForeignNode node;
+              node.data = child.data;
+              node.tag = child.tag;
+              node.keepAlive = child.keepAlive;
+              int childReference = makeVariableRef(
+                  VariableRef::Kind::Foreign, ref->frame, nullptr, &node);
+              variable.set("variablesReference",
+                  Json::integer(childReference));
+            }
+            else
+            {
+              variable.set("variablesReference", Json::integer(0));
+            }
+            variables.append(std::move(variable));
           }
           break;
         }
