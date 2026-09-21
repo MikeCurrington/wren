@@ -683,17 +683,20 @@ namespace debug
         // provider. A non-empty summary replaces the default "ClassName @
         // 0x..." display and marks the value expandable.
         bool expandable = isExpandable(value);
-        if (!expandable && foreignProvider_.summarize != nullptr &&
-            IS_OBJ(value) && AS_OBJ(value)->type == OBJ_FOREIGN)
+        ForeignNode foreign;
+        bool isForeign = IS_OBJ(value) && AS_OBJ(value)->type == OBJ_FOREIGN;
+        if (isForeign)
         {
-          ForeignNode node;
-          node.data = AS_FOREIGN(value)->data;
-          node.wrenClassName = dapType(value);
-          std::string summary = foreignProvider_.summarize(node);
-          if (!summary.empty())
+          foreign.data = AS_FOREIGN(value)->data;
+          foreign.wrenClassName = dapType(value);
+          if (foreignProvider_.summarize != nullptr)
           {
-            variable.set("value", Json::string(truncate(summary, kMaxValueLength)));
-            expandable = foreignProvider_.children != nullptr;
+            std::string summary = foreignProvider_.summarize(foreign);
+            if (!summary.empty())
+            {
+              variable.set("value", Json::string(truncate(summary, kMaxValueLength)));
+              expandable = foreignProvider_.children != nullptr;
+            }
           }
         }
 
@@ -706,7 +709,8 @@ namespace debug
           if (type == OBJ_MAP) kind = VariableRef::Kind::Map;
           else if (type == OBJ_INSTANCE) kind = VariableRef::Kind::Instance;
           else if (type == OBJ_FOREIGN) kind = VariableRef::Kind::Foreign;
-          int childReference = makeVariableRef(kind, ref->frame, handle);
+          int childReference = makeVariableRef(
+              kind, ref->frame, handle, isForeign ? &foreign : nullptr);
           variable.set("variablesReference", Json::integer(childReference));
         }
         else
