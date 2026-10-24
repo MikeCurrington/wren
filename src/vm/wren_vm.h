@@ -22,10 +22,10 @@ typedef enum
 // Note that even non-heap-allocated values can be stored here.
 struct WrenHandle
 {
-  Value value;
+  Value value {};
 
-  WrenHandle* prev;
-  WrenHandle* next;
+  WrenHandle* prev = nullptr;
+  WrenHandle* next = nullptr;
 };
 
 // A saved API slot region, used to call back into Wren from inside a foreign
@@ -51,31 +51,36 @@ struct WrenCallContext
 
 struct WrenVM
 {
-  ObjClass* boolClass;
-  ObjClass* classClass;
-  ObjClass* fiberClass;
-  ObjClass* fnClass;
-  ObjClass* listClass;
-  ObjClass* mapClass;
-  ObjClass* nullClass;
-  ObjClass* numClass;
-  ObjClass* objectClass;
-  ObjClass* rangeClass;
-  ObjClass* stringClass;
+  WrenVM(const WrenVM&) = delete;
+  WrenVM& operator=(const WrenVM&) = delete;
+
+  WrenVM(const WrenConfiguration* config) noexcept;
+
+  ObjClass* boolClass = nullptr;
+  ObjClass* classClass = nullptr;
+  ObjClass* fiberClass = nullptr;
+  ObjClass* fnClass = nullptr;
+  ObjClass* listClass = nullptr;
+  ObjClass* mapClass = nullptr;
+  ObjClass* nullClass = nullptr;
+  ObjClass* numClass = nullptr;
+  ObjClass* objectClass = nullptr;
+  ObjClass* rangeClass = nullptr;
+  ObjClass* stringClass = nullptr;
 
   // The fiber that is currently running.
-  ObjFiber* fiber;
+  ObjFiber* fiber = nullptr;
 
   // The loaded modules. Each key is an ObjString (except for the main module,
   // whose key is null) for the module's name and the value is the ObjModule
   // for the module.
-  ObjMap* modules;
+  ObjMap* modules = nullptr;
   
   // The most recently imported module. More specifically, the module whose
   // code has most recently finished executing.
   //
   // Not treated like a GC root since the module is already in [modules].
-  ObjModule* lastModule;
+  ObjModule* lastModule = nullptr;
 
   // Memory management data:
 
@@ -86,16 +91,16 @@ struct WrenVM
   size_t bytesAllocated;
 
   // The number of total allocated bytes that will trigger the next GC.
-  size_t nextGC;
+  size_t nextGC = 0;
 
   // The first object in the linked list of all currently allocated objects.
-  Obj* first;
+  Obj* first = nullptr;
 
   // The "gray" set for the garbage collector. This is the stack of unprocessed
   // objects while a garbage collection pass is in process.
-  Obj** gray;
-  int grayCount;
-  int grayCapacity;
+  Obj** gray = nullptr;
+  int grayCount = 0;
+  int grayCapacity = 0;
 
   // The list of temporary roots. This is for temporary or new objects that are
   // not otherwise reachable but should not be collected.
@@ -103,13 +108,13 @@ struct WrenVM
   // They are organized as a stack of pointers stored in this array. This
   // implies that temporary roots need to have stack semantics: only the most
   // recently pushed object can be released.
-  Obj* tempRoots[WREN_MAX_TEMP_ROOTS];
+  Obj* tempRoots[WREN_MAX_TEMP_ROOTS] {};
 
-  int numTempRoots;
+  int numTempRoots= 0;
   
   // Pointer to the first node in the linked list of active handles or NULL if
   // there are none.
-  WrenHandle* handles;
+  WrenHandle* handles = nullptr;
   
   // Pointer to the bottom of the range of stack slots available for use from
   // the C API. During a foreign method, this will be in the stack of the fiber
@@ -118,7 +123,7 @@ struct WrenVM
   // If not in a foreign method, this is initially NULL. If the user requests
   // slots by calling wrenEnsureSlots(), a stack is created and this is
   // initialized.
-  Value* apiStack;
+  Value* apiStack = nullptr;
 
   // The stack of nested API call contexts created by wrenBeginCall(). The head
   // is the innermost context. Each context's fiber is a fiber that is suspended
@@ -126,33 +131,33 @@ struct WrenVM
   // not be resumed from Wren while they are in this list.
   //
   // This is NULL when there are no nested calls, which is the common case.
-  WrenCallContext* callContexts;
+  WrenCallContext* callContexts = nullptr;
 
-  WrenConfiguration config;
+  WrenConfiguration config{};
   
   // Compiler and debugger data:
 
   // The compiler that is currently compiling code. This is used so that heap
   // allocated objects used by the compiler can be found if a GC is kicked off
   // in the middle of a compile.
-  Compiler* compiler;
+  Compiler* compiler = nullptr;
 
   // There is a single global symbol table for all method names on all classes.
   // Method calls are dispatched directly by index in this table.
-  SymbolTable methodNames;
+  SymbolTable methodNames {};
 
   // The debug hook, or NULL if debugging is not in use. When set, it is
   // invoked from the interpreter loop on each new source line. See the debug
   // API declarations in wren.h.
-  WrenDebugHookFn debugHook;
+  WrenDebugHookFn debugHook {};
 
   // Opaque value passed back to the debug hook.
-  void* debugHookData;
+  void* debugHookData = nullptr;
 
   // While the debug hook is running, its API slots extend the fiber's stack
   // top. This remembers the real top so that the frame inspection functions
   // still report the frame's own slots. NULL when the hook isn't running.
-  Value* debugSavedStackTop;
+  Value* debugSavedStackTop = nullptr;
 };
 
 // A generic allocation function that handles all explicit memory management.

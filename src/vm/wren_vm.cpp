@@ -56,7 +56,7 @@ void wrenInitConfiguration(WrenConfiguration* config)
   config->userData = nullptr;
 }
 
-WrenVM* wrenNewVM(WrenConfiguration* config)
+WrenVM::WrenVM(const WrenConfiguration* config) noexcept
 {
   WrenReallocateFn reallocate = defaultReallocate;
   void* userData = nullptr;
@@ -65,35 +65,34 @@ WrenVM* wrenNewVM(WrenConfiguration* config)
     reallocate = config->reallocateFn ? config->reallocateFn : defaultReallocate;
   }
   
-  WrenVM* vm = (WrenVM*)reallocate(nullptr, sizeof(*vm), userData);
-  memset(vm, 0, sizeof(WrenVM));
+  //WrenVM* vm = (WrenVM*)reallocate(nullptr, sizeof(*vm), userData);
+  //memset(vm, 0, sizeof(WrenVM));
 
   // Copy the configuration if given one.
   if (config != nullptr)
   {
-    memcpy(&vm->config, config, sizeof(WrenConfiguration));
+    memcpy(&this->config, config, sizeof(WrenConfiguration));
 
     // We choose to set this after copying, 
     // rather than modifying the user config pointer
-    vm->config.reallocateFn = reallocate;
+    this->config.reallocateFn = reallocate;
   }
   else
   {
-    wrenInitConfiguration(&vm->config);
+    wrenInitConfiguration(&this->config);
   }
 
   // TODO: Should we allocate and free this during a GC?
-  vm->grayCount = 0;
+  this->grayCount = 0;
   // TODO: Tune this.
-  vm->grayCapacity = 4;
-  vm->gray = (Obj**)reallocate(nullptr, vm->grayCapacity * sizeof(Obj*), userData);
-  vm->nextGC = vm->config.initialHeapSize;
+  this->grayCapacity = 4;
+  this->gray = (Obj**)reallocate(nullptr, this->grayCapacity * sizeof(Obj*), userData);
+  this->nextGC = this->config.initialHeapSize;
 
-  wrenSymbolTableInit(&vm->methodNames);
+  wrenSymbolTableInit(&this->methodNames);
 
-  vm->modules = wrenConstruct<ObjMap>(vm, 0);
-  wrenInitializeCore(vm);
-  return vm;
+  this->modules = wrenConstruct<ObjMap>(this, 0);
+  wrenInitializeCore(this);
 }
 
 void wrenFreeVM(WrenVM* vm)
@@ -1769,7 +1768,7 @@ void wrenPopRoot(WrenVM* vm)
   vm->numTempRoots--;
 }
 
-int wrenGetSlotCount(WrenVM* vm)
+int wrenGetSlotCount(const WrenVM* vm)
 {
   if (vm->apiStack == nullptr) return 0;
   
@@ -1804,14 +1803,14 @@ void wrenEnsureSlots(WrenVM* vm, int numSlots)
 }
 
 // Ensures that [slot] is a valid index into the API's stack of slots.
-static void validateApiSlot(WrenVM* vm, int slot)
+static void validateApiSlot(const WrenVM* vm, int slot)
 {
   ASSERT(slot >= 0, "Slot cannot be negative.");
   ASSERT(slot < wrenGetSlotCount(vm), "Not that many slots.");
 }
 
 // Gets the type of the object in [slot].
-WrenType wrenGetSlotType(WrenVM* vm, int slot)
+WrenType wrenGetSlotType(const WrenVM* vm, int slot)
 {
   validateApiSlot(vm, slot);
   if (IS_BOOL(vm->apiStack[slot])) return WREN_TYPE_BOOL;
@@ -2134,7 +2133,7 @@ void wrenAbortFiber(WrenVM* vm, int slot)
   vm->fiber->error = vm->apiStack[slot];
 }
 
-void* wrenGetUserData(WrenVM* vm)
+void* wrenGetUserData(const WrenVM* vm)
 {
 	return vm->config.userData;
 }
