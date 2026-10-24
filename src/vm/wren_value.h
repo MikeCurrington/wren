@@ -47,7 +47,7 @@
 
 // Forward declarations
 struct ObjClass;
-struct WrenVM;
+class WrenVM;
 
 // Declared in wren_vm.h. Declared here as well so that wrenConstruct(), below,
 // can be defined in this header.

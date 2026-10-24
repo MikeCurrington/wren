@@ -735,7 +735,7 @@ public:
 private:
   VM* vm_;
   ModuleReg reg_;
-  friend struct ::WrenVM;
+  friend class ::WrenVM;
   template <typename> friend class Foreign;
 };
 

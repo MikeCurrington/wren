@@ -63,10 +63,13 @@ struct WrenCallContext
   WrenCallContext* prev;
 };
 
-struct WrenVM
+class WrenVM
 {
+public:
   WrenVM(const WrenVM&) = delete;
   WrenVM& operator=(const WrenVM&) = delete;
+  WrenVM(WrenVM&&) = delete;
+  WrenVM& operator=(WrenVM&&) = delete;
 
   // C++ host configuration: the plain Wren settings plus debugger options.
   struct Config
@@ -235,6 +238,35 @@ struct WrenVM
   void ensureSlots(int n) { wrenEnsureSlots(this, n); }
   WrenType slotType(int s) const { return wrenGetSlotType(this, s); }
 
+private:
+  // ---------------------------------------------------------------------
+  // State absorbed from the former wren::VM C++ wrapper. Only WrenVM's own
+  // methods touch these.
+  // ---------------------------------------------------------------------
+
+  // The port the debugger listens on (127.0.0.1), from Config.
+  int debugPort = 4711;
+
+  // Foreign classes and methods registered from C++ through module(). The
+  // default bindForeignMethod()/bindForeignClass()/loadModule()
+  // implementations serve these. Module is defined in wren.hpp; it is only
+  // complete where those are defined (wren.hpp / wren_vm.cpp).
+  std::unordered_map<std::string, std::unique_ptr<wren::Module>> modules_;
+
+  // The attached debugger, if any. Detached in ~WrenVM while the VM is still
+  // valid, since it holds WrenHandles and the debug hook.
+  std::unique_ptr<wren::debug::Debugger> debugger_;
+
+public:
+  // ---------------------------------------------------------------------
+  // Internal interpreter state.
+  //
+  // Wren's own implementation (the interpreter loop, garbage collector,
+  // compiler, primitives, and debug internals) reads and writes these fields
+  // directly, so they remain public to it. They are not part of the host
+  // API: hosts should work through the methods above.
+  // ---------------------------------------------------------------------
+
   ObjClass* boolClass = nullptr;
   ObjClass* classClass = nullptr;
   ObjClass* fiberClass = nullptr;
@@ -337,23 +369,6 @@ struct WrenVM
   // top. This remembers the real top so that the frame inspection functions
   // still report the frame's own slots. NULL when the hook isn't running.
   Value* debugSavedStackTop = nullptr;
-
-  // ---------------------------------------------------------------------
-  // State absorbed from the former wren::VM C++ wrapper.
-  // ---------------------------------------------------------------------
-
-  // The port the debugger listens on (127.0.0.1), from Config.
-  int debugPort = 4711;
-
-  // Foreign classes and methods registered from C++ through module(). The
-  // default bindForeignMethod()/bindForeignClass()/loadModule()
-  // implementations serve these. Module is defined in wren.hpp; it is only
-  // complete where those are defined (wren.hpp / wren_vm.cpp).
-  std::unordered_map<std::string, std::unique_ptr<wren::Module>> modules_;
-
-  // The attached debugger, if any. Detached in ~WrenVM while the VM is still
-  // valid, since it holds WrenHandles and the debug hook.
-  std::unique_ptr<wren::debug::Debugger> debugger_;
 };
 
 // A generic allocation function that handles all explicit memory management.
