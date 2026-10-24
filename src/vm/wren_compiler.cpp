@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <string>
+
 #include "wren_common.h"
 #include "wren_compiler.h"
 #include "wren_debug.h"
@@ -868,8 +870,7 @@ static void readNumber(Parser* parser)
 // Finishes lexing an identifier. Handles reserved words.
 static void readName(Parser* parser, TokenType type, char firstChar)
 {
-  ByteBuffer string;
-  string.clear();
+  std::string string;
   string.push_back(firstChar);
 
   while (isName(peekChar(parser)) || isDigit(peekChar(parser)))
@@ -889,11 +890,10 @@ static void readName(Parser* parser, TokenType type, char firstChar)
       break;
     }
   }
-  
-  parser->next.value = wrenNewStringLength(parser->vm,
-                                            (char*)string.data(), string.size());
 
-  string.clear();
+  parser->next.value = wrenNewStringLength(parser->vm, string.data(),
+                                           string.size());
+
   makeToken(parser, type);
 }
 
@@ -927,7 +927,7 @@ static int readHexEscape(Parser* parser, int digits, const char* description)
 }
 
 // Reads a hex digit Unicode escape sequence in a string literal.
-static void readUnicodeEscape(Parser* parser, ByteBuffer* string, int length)
+static void readUnicodeEscape(Parser* parser, std::string* string, int length)
 {
   int value = readHexEscape(parser, length, "Unicode");
 
@@ -937,7 +937,8 @@ static void readUnicodeEscape(Parser* parser, ByteBuffer* string, int length)
   {
 #if 1
     std::fill_n(std::back_inserter(*string), numBytes, 0);
-    wrenUtf8Encode(value, string->data() + string->size() - numBytes);
+    wrenUtf8Encode(value,
+                   (uint8_t*)string->data() + string->size() - numBytes);
 #else
     string->fill(parser->vm, 0, numBytes);
     wrenUtf8Encode(value, string->data() + string->size() - numBytes);
@@ -947,8 +948,7 @@ static void readUnicodeEscape(Parser* parser, ByteBuffer* string, int length)
 
 static void readRawString(Parser* parser)
 {
-  ByteBuffer string;
-  string.clear();
+  std::string string;
   TokenType type = TOKEN_STRING;
 
   //consume the second and third "
@@ -1015,20 +1015,18 @@ static void readRawString(Parser* parser)
 
   count -= (offset > count) ? count : offset;
 
-  parser->next.value = wrenNewStringLength(parser->vm, 
-                         ((char*)string.data()) + offset, count);
-  
-  string.clear();
+  parser->next.value = wrenNewStringLength(parser->vm,
+                         string.data() + offset, count);
+
   makeToken(parser, type);
 }
 
 // Finishes lexing a string literal.
 static void readString(Parser* parser)
 {
-  ByteBuffer string;
+  std::string string;
   TokenType type = TOKEN_STRING;
-  string.clear();
-  
+
   for (;;)
   {
     char c = nextChar(parser);
@@ -1081,7 +1079,7 @@ static void readString(Parser* parser)
         case 'U':  readUnicodeEscape(parser, &string, 8); break;
         case 'v':  string.push_back('\v'); break;
         case 'x':
-          string.push_back((uint8_t)readHexEscape(parser, 2, "byte"));
+          string.push_back((char)readHexEscape(parser, 2, "byte"));
           break;
 
         default:
@@ -1123,9 +1121,8 @@ static void readString(Parser* parser)
 #endif
 
   parser->next.value = wrenNewStringLength(parser->vm,
-                                              (char*)string.data(), string.size());
-  
-  string.clear();
+                                           string.data(), string.size());
+
   makeToken(parser, type);
 }
 
