@@ -75,9 +75,9 @@ void wrenBindSuperclass(WrenVM* vm, ObjClass* subclass, ObjClass* superclass)
   }
 
   // Inherit methods from its superclass.
-  for (int i = 0; i < superclass->methods.count; i++)
+  for (int i = 0; i < superclass->methods.size(); i++)
   {
-    wrenBindMethod(vm, subclass, i, superclass->methods.data[i]);
+    wrenBindMethod(vm, subclass, i, superclass->methods[i]);
   }
 }
 
@@ -118,14 +118,15 @@ ObjClass* wrenNewClass(WrenVM* vm, ObjClass* superclass, int numFields,
 void wrenBindMethod(WrenVM* vm, ObjClass* classObj, int symbol, Method method)
 {
   // Make sure the buffer is big enough to contain the symbol's index.
-  if (symbol >= classObj->methods.count)
+  if (symbol >= classObj->methods.size())
   {
     Method noMethod;
     noMethod.type = METHOD_NONE;
-    classObj->methods.fill(vm, noMethod, symbol - classObj->methods.count + 1);
+    classObj->methods.insert(classObj->methods.end(),
+                             symbol - classObj->methods.size() + 1, noMethod);
   }
 
-  classObj->methods.data[symbol] = method;
+  classObj->methods[symbol] = method;
 }
 
 ObjClosure::ObjClosure(WrenVM* vm, ObjFn* _fn)
@@ -271,23 +272,9 @@ ObjInstance::ObjInstance(WrenVM* vm, ObjClass* _classObj)
 ObjList::ObjList(WrenVM* vm, uint32_t numElements)
   : Obj(vm, OBJ_LIST, vm->listClass)
 {
-  // Keep the list from being swept in case the elements allocation triggers
-  // a GC. Its elements buffer is empty until then, so the list can be safely
-  // traversed while that happens.
-  wrenPushRoot(vm, this);
-
-  // Allocate the elements array.
-  Value* data = nullptr;
-  if (numElements > 0)
-  {
-    data = ALLOCATE_ARRAY(vm, Value, numElements);
-  }
-
-  wrenPopRoot(vm);
-
-  elements.data = data;
-  elements.capacity = numElements;
-  elements.count = numElements;
+  // The vector's storage comes from the global heap, not the VM's allocator,
+  // so growing it cannot trigger a GC.
+  elements.resize(numElements, NULL_VAL);
 }
 
 void wrenListInsert(WrenVM* vm, ObjList* list, Value value, uint32_t index)
@@ -295,44 +282,41 @@ void wrenListInsert(WrenVM* vm, ObjList* list, Value value, uint32_t index)
   if (IS_OBJ(value)) wrenPushRoot(vm, AS_OBJ(value));
 
   // Add a slot at the end of the list.
-  list->elements.write(vm, NULL_VAL);
+  list->elements.push_back(NULL_VAL);
 
   if (IS_OBJ(value)) wrenPopRoot(vm);
 
   // Shift the existing elements down.
-  for (uint32_t i = list->elements.count - 1; i > index; i--)
+  for (uint32_t i = list->elements.size() - 1; i > index; i--)
   {
-    list->elements.data[i] = list->elements.data[i - 1];
+    list->elements[i] = list->elements[i - 1];
   }
 
   // Store the new element.
-  list->elements.data[index] = value;
+  list->elements[index] = value;
 }
 
 Value wrenListRemoveAt(WrenVM* vm, ObjList* list, uint32_t index)
 {
-  Value removed = list->elements.data[index];
+  Value removed = list->elements[index];
 
   if (IS_OBJ(removed)) wrenPushRoot(vm, AS_OBJ(removed));
 
   // Shift items up.
-  for (int i = index; i < list->elements.count - 1; i++)
+  for (int i = index; i < list->elements.size() - 1; i++)
   {
-    list->elements.data[i] = list->elements.data[i + 1];
+    list->elements[i] = list->elements[i + 1];
   }
 
   // If we have too much excess capacity, shrink it.
-  if (list->elements.capacity / GROW_FACTOR >= list->elements.count)
+  if (list->elements.capacity() / GROW_FACTOR >= list->elements.size())
   {
-    list->elements.data = (Value*)wrenReallocate(vm, list->elements.data,
-        sizeof(Value) * list->elements.capacity,
-        sizeof(Value) * (list->elements.capacity / GROW_FACTOR));
-    list->elements.capacity /= GROW_FACTOR;
+    list->elements.shrink_to_fit();
   }
 
   if (IS_OBJ(removed)) wrenPopRoot(vm);
 
-  list->elements.count--;
+  list->elements.pop_back();
   return removed;
 }
 
@@ -381,7 +365,7 @@ static uint32_t hashObject(Obj* object)
     case OBJ_FN:
     {
       ObjFn* fn = (ObjFn*)object;
-      return hashNumber(fn->arity) ^ hashNumber(fn->code.count);
+      return hashNumber(fn->arity) ^ hashNumber(fn->code.size());
     }
 
     case OBJ_RANGE:
@@ -963,9 +947,9 @@ void wrenGrayValue(WrenVM* vm, Value value)
 
 void wrenGrayBuffer(WrenVM* vm, ValueBuffer* buffer)
 {
-  for (int i = 0; i < buffer->count; i++)
+  for (int i = 0; i < buffer->size(); i++)
   {
-    wrenGrayValue(vm, buffer->data[i]);
+    wrenGrayValue(vm, (*buffer)[i]);
   }
 }
 
@@ -978,11 +962,11 @@ static void blackenClass(WrenVM* vm, ObjClass* classObj)
   wrenGrayObj(vm, (Obj*)classObj->superclass);
 
   // Method function objects.
-  for (int i = 0; i < classObj->methods.count; i++)
+  for (int i = 0; i < classObj->methods.size(); i++)
   {
-    if (classObj->methods.data[i].type == METHOD_BLOCK)
+    if (classObj->methods[i].type == METHOD_BLOCK)
     {
-      wrenGrayObj(vm, (Obj*)classObj->methods.data[i].as.closure);
+      wrenGrayObj(vm, (Obj*)classObj->methods[i].as.closure);
     }
   }
 
@@ -992,7 +976,7 @@ static void blackenClass(WrenVM* vm, ObjClass* classObj)
 
   // Keep track of how much memory is still in use.
   vm->bytesAllocated += sizeof(ObjClass);
-  vm->bytesAllocated += classObj->methods.capacity * sizeof(Method);
+  vm->bytesAllocated += classObj->methods.capacity() * sizeof(Method);
 }
 
 static void blackenClosure(WrenVM* vm, ObjClosure* closure)
@@ -1053,11 +1037,11 @@ static void blackenFn(WrenVM* vm, ObjFn* fn)
 
   // Keep track of how much memory is still in use.
   vm->bytesAllocated += sizeof(ObjFn);
-  vm->bytesAllocated += sizeof(uint8_t) * fn->code.capacity;
-  vm->bytesAllocated += sizeof(Value) * fn->constants.capacity;
+  vm->bytesAllocated += sizeof(uint8_t) * fn->code.capacity();
+  vm->bytesAllocated += sizeof(Value) * fn->constants.capacity();
   
   // The debug line number buffer.
-  vm->bytesAllocated += sizeof(int) * fn->code.capacity;
+  vm->bytesAllocated += sizeof(int) * fn->code.capacity();
   // TODO: What about the function name?
 }
 
@@ -1092,7 +1076,7 @@ static void blackenList(WrenVM* vm, ObjList* list)
 
   // Keep track of how much memory is still in use.
   vm->bytesAllocated += sizeof(ObjList);
-  vm->bytesAllocated += sizeof(Value) * list->elements.capacity;
+  vm->bytesAllocated += sizeof(Value) * list->elements.capacity();
 }
 
 static void blackenMap(WrenVM* vm, ObjMap* map)
@@ -1115,12 +1099,12 @@ static void blackenMap(WrenVM* vm, ObjMap* map)
 static void blackenModule(WrenVM* vm, ObjModule* module)
 {
   // Top-level variables.
-  for (int i = 0; i < module->variables.count; i++)
+  for (int i = 0; i < module->variables.size(); i++)
   {
-    wrenGrayValue(vm, module->variables.data[i]);
+    wrenGrayValue(vm, module->variables[i]);
   }
 
-  wrenBlackenSymbolTable(vm, &module->variableNames);
+  module->variableNames.blacken(vm);
 
   wrenGrayObj(vm, (Obj*)module->name);
 
@@ -1196,7 +1180,7 @@ void wrenFreeObj(WrenVM* vm, Obj* obj)
   switch (obj->type)
   {
     case OBJ_CLASS:
-      ((ObjClass*)obj)->methods.clear(vm);
+      ((ObjClass*)obj)->methods = {};
       break;
 
     case OBJ_FIBER:
@@ -1210,14 +1194,14 @@ void wrenFreeObj(WrenVM* vm, Obj* obj)
     case OBJ_FN:
     {
       ObjFn* fn = (ObjFn*)obj;
-      fn->constants.clear(vm);
-      fn->code.clear(vm);
-      fn->debug->sourceLines.clear(vm);
-      for (int i = 0; i < fn->debug->localNames.count; i++)
+      fn->constants = {};
+      fn->code = {};
+      fn->debug->sourceLines = {};
+      for (int i = 0; i < fn->debug->localNames.size(); i++)
       {
-        DEALLOCATE(vm, fn->debug->localNames.data[i].name);
+        DEALLOCATE(vm, fn->debug->localNames[i].name);
       }
-      fn->debug->localNames.clear(vm);
+      fn->debug->localNames = {};
       DEALLOCATE(vm, fn->debug->name);
       DEALLOCATE(vm, fn->debug);
       break;
@@ -1228,7 +1212,7 @@ void wrenFreeObj(WrenVM* vm, Obj* obj)
       break;
 
     case OBJ_LIST:
-      ((ObjList*)obj)->elements.clear(vm);
+      ((ObjList*)obj)->elements = {};
       break;
 
     case OBJ_MAP:
@@ -1236,8 +1220,8 @@ void wrenFreeObj(WrenVM* vm, Obj* obj)
       break;
 
     case OBJ_MODULE:
-      wrenSymbolTableClear(vm, &((ObjModule*)obj)->variableNames);
-      ((ObjModule*)obj)->variables.clear(vm);
+      ((ObjModule*)obj)->variableNames.clear(vm);
+      ((ObjModule*)obj)->variables = {};
       break;
 
     case OBJ_CLOSURE:

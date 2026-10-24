@@ -32,9 +32,9 @@ void wrenDebugRecordClassFields(WrenVM* vm, const char* className,
 {
   auto& entry = classFieldNames()[vm][className];
   entry.clear();
-  for (int i = 0; i < names->count; i++)
+  for (int i = 0; i < names->count(); i++)
   {
-    entry.push_back(names->data[i]->value);
+    entry.push_back((*names)[i]->value);
   }
 }
 
@@ -91,7 +91,7 @@ void wrenDebugPrintStackTrace(WrenVM* vm)
     if (fn->module->name == nullptr) continue;
 
     // -1 because IP has advanced past the instruction that it just executed.
-    int line = fn->debug->sourceLines.data[frame->ip - fn->code.data - 1];
+    int line = fn->debug->sourceLines[frame->ip - fn->code.data() - 1];
     vm->error(WREN_ERROR_STACK_TRACE, fn->module->name->value, line,
               fn->debug->name);
   }
@@ -157,10 +157,10 @@ void wrenDumpValue(Value value)
 static int dumpInstruction(WrenVM* vm, ObjFn* fn, int i, int* lastLine)
 {
   int start = i;
-  uint8_t* bytecode = fn->code.data;
+  uint8_t* bytecode = fn->code.data();
   Code code = (Code)bytecode[i];
 
-  int line = fn->debug->sourceLines.data[i];
+  int line = fn->debug->sourceLines[i];
   if (lastLine == nullptr || *lastLine != line)
   {
     printf("%4d:", line);
@@ -186,7 +186,7 @@ static int dumpInstruction(WrenVM* vm, ObjFn* fn, int i, int* lastLine)
     {
       int constant = READ_SHORT();
       printf("%-16s %5d '", "CONSTANT", constant);
-      wrenDumpValue(fn->constants.data[constant]);
+      wrenDumpValue(fn->constants[constant]);
       printf("'\n");
       break;
     }
@@ -214,7 +214,7 @@ static int dumpInstruction(WrenVM* vm, ObjFn* fn, int i, int* lastLine)
     {
       int slot = READ_SHORT();
       printf("%-16s %5d '%s'\n", "LOAD_MODULE_VAR", slot,
-             fn->module->variableNames.data[slot]->value);
+             fn->module->variableNames[slot]->value);
       break;
     }
 
@@ -222,7 +222,7 @@ static int dumpInstruction(WrenVM* vm, ObjFn* fn, int i, int* lastLine)
     {
       int slot = READ_SHORT();
       printf("%-16s %5d '%s'\n", "STORE_MODULE_VAR", slot,
-             fn->module->variableNames.data[slot]->value);
+             fn->module->variableNames[slot]->value);
       break;
     }
 
@@ -254,7 +254,7 @@ static int dumpInstruction(WrenVM* vm, ObjFn* fn, int i, int* lastLine)
       int numArgs = bytecode[i - 1] - CODE_CALL_0;
       int symbol = READ_SHORT();
       printf("CALL_%-11d %5d '%s'\n", numArgs, symbol,
-             vm->methodNames.data[symbol]->value);
+             vm->methodNames[symbol]->value);
       break;
     }
 
@@ -280,7 +280,7 @@ static int dumpInstruction(WrenVM* vm, ObjFn* fn, int i, int* lastLine)
       int symbol = READ_SHORT();
       int superclass = READ_SHORT();
       printf("SUPER_%-10d %5d '%s' %5d\n", numArgs, symbol,
-             vm->methodNames.data[symbol]->value, superclass);
+             vm->methodNames[symbol]->value, superclass);
       break;
     }
 
@@ -326,9 +326,9 @@ static int dumpInstruction(WrenVM* vm, ObjFn* fn, int i, int* lastLine)
     {
       int constant = READ_SHORT();
       printf("%-16s %5d ", "CLOSURE", constant);
-      wrenDumpValue(fn->constants.data[constant]);
+      wrenDumpValue(fn->constants[constant]);
       printf(" ");
-      ObjFn* loadedFn = AS_FN(fn->constants.data[constant]);
+      ObjFn* loadedFn = AS_FN(fn->constants[constant]);
       for (int j = 0; j < loadedFn->numUpvalues; j++)
       {
         int isLocal = READ_BYTE();
@@ -357,7 +357,7 @@ static int dumpInstruction(WrenVM* vm, ObjFn* fn, int i, int* lastLine)
     {
       int symbol = READ_SHORT();
       printf("%-16s %5d '%s'\n", "METHOD_INSTANCE", symbol,
-             vm->methodNames.data[symbol]->value);
+             vm->methodNames[symbol]->value);
       break;
     }
 
@@ -365,7 +365,7 @@ static int dumpInstruction(WrenVM* vm, ObjFn* fn, int i, int* lastLine)
     {
       int symbol = READ_SHORT();
       printf("%-16s %5d '%s'\n", "METHOD_STATIC", symbol,
-             vm->methodNames.data[symbol]->value);
+             vm->methodNames[symbol]->value);
       break;
     }
       
@@ -377,7 +377,7 @@ static int dumpInstruction(WrenVM* vm, ObjFn* fn, int i, int* lastLine)
     {
       int name = READ_SHORT();
       printf("%-16s %5d '", "IMPORT_MODULE", name);
-      wrenDumpValue(fn->constants.data[name]);
+      wrenDumpValue(fn->constants[name]);
       printf("'\n");
       break;
     }
@@ -386,7 +386,7 @@ static int dumpInstruction(WrenVM* vm, ObjFn* fn, int i, int* lastLine)
     {
       int variable = READ_SHORT();
       printf("%-16s %5d '", "IMPORT_VARIABLE", variable);
-      wrenDumpValue(fn->constants.data[variable]);
+      wrenDumpValue(fn->constants[variable]);
       printf("'\n");
       break;
     }
@@ -462,10 +462,10 @@ void wrenVmDebugHook(WrenVM* vm, ObjFiber* fiber, CallFrame* frame)
   ObjFn* fn = frame->closure->fn;
   if (fn->debug == nullptr) return;
 
-  int offset = (int)(frame->ip - fn->code.data);
-  if (offset < 0 || offset >= fn->code.count) return;
+  int offset = (int)(frame->ip - fn->code.data());
+  if (offset < 0 || offset >= fn->code.size()) return;
 
-  int line = fn->debug->sourceLines.data[offset];
+  int line = fn->debug->sourceLines[offset];
 
   if (line == frame->debugLastLine && offset >= frame->debugLastOffset) return;
   frame->debugLastLine = line;
@@ -545,10 +545,10 @@ bool wrenDebugGetFrameInfo(WrenVM* vm, int frame, WrenDebugFrameInfo* info)
   {
     if (fn->debug->name != nullptr) info->function = fn->debug->name;
 
-    int offset = (int)(callFrame->ip - fn->code.data);
-    if (offset >= 0 && offset < fn->debug->sourceLines.count)
+    int offset = (int)(callFrame->ip - fn->code.data());
+    if (offset >= 0 && offset < fn->debug->sourceLines.size())
     {
-      info->line = fn->debug->sourceLines.data[offset];
+      info->line = fn->debug->sourceLines[offset];
     }
   }
 
@@ -607,15 +607,15 @@ const char* wrenDebugGetLocalName(WrenVM* vm, int frame, int index)
   ObjFn* fn = callFrame->closure->fn;
   if (fn->debug == nullptr) return nullptr;
 
-  int offset = (int)(callFrame->ip - fn->code.data);
+  int offset = (int)(callFrame->ip - fn->code.data());
 
   // Entries are in increasing bytecode offset order, but are interleaved by
   // slot, so scan them all. The last entry for [index] at or before the
   // instruction the frame is about to execute wins.
   const char* name = nullptr;
-  for (int i = 0; i < fn->debug->localNames.count; i++)
+  for (int i = 0; i < fn->debug->localNames.size(); i++)
   {
-    LocalDebugName* entry = &fn->debug->localNames.data[i];
+    LocalDebugName* entry = &fn->debug->localNames[i];
     if (entry->slot == index && entry->offset <= offset)
     {
       name = entry->name;
@@ -637,25 +637,25 @@ int wrenDebugGetModuleVariableCount(WrenVM* vm, int frame)
 {
   ObjModule* module = debugGetFrameModule(vm, frame);
   if (module == nullptr) return 0;
-  return module->variableNames.count;
+  return module->variableNames.count();
 }
 
 const char* wrenDebugGetModuleVariableName(WrenVM* vm, int frame, int index)
 {
   ObjModule* module = debugGetFrameModule(vm, frame);
   ASSERT(module != nullptr, "Frame index out of range.");
-  ASSERT(index >= 0 && index < module->variableNames.count,
+  ASSERT(index >= 0 && index < module->variableNames.count(),
          "Variable index out of range.");
-  return module->variableNames.data[index]->value;
+  return module->variableNames[index]->value;
 }
 
 void wrenDebugGetModuleVariable(WrenVM* vm, int frame, int index, int slot)
 {
   ObjModule* module = debugGetFrameModule(vm, frame);
   ASSERT(module != nullptr, "Frame index out of range.");
-  ASSERT(index >= 0 && index < module->variables.count,
+  ASSERT(index >= 0 && index < module->variables.size(),
          "Variable index out of range.");
   ASSERT(slot >= 0 && slot < wrenGetSlotCount(vm), "Not that many slots.");
 
-  vm->apiStack[slot] = module->variables.data[index];
+  vm->apiStack[slot] = module->variables[index];
 }

@@ -70,7 +70,7 @@ namespace debug
                           kMaxValueLength);
 
         case OBJ_LIST:
-          return "list [" + std::to_string(AS_LIST(value)->elements.count) + "]";
+          return "list [" + std::to_string(AS_LIST(value)->elements.size()) + "]";
 
         case OBJ_MAP:
           return "map [" + std::to_string(AS_MAP(value)->count) + "]";

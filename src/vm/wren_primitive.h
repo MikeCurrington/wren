@@ -8,8 +8,7 @@
 #define PRIMITIVE(cls, name, function)                                         \
     do                                                                         \
     {                                                                          \
-      int symbol = wrenSymbolTableEnsure(vm,                                   \
-          &vm->methodNames, name, strlen(name));                               \
+      int symbol = vm->methodNames.ensure(vm, name, strlen(name));             \
       Method method;                                                           \
       method.type = METHOD_PRIMITIVE;                                          \
       method.as.primitive = prim_##function;                                   \
@@ -21,8 +20,7 @@
 #define FUNCTION_CALL(cls, name, function)                                     \
     do                                                                         \
     {                                                                          \
-      int symbol = wrenSymbolTableEnsure(vm,                                   \
-          &vm->methodNames, name, strlen(name));                               \
+      int symbol = vm->methodNames.ensure(vm, name, strlen(name));             \
       Method method;                                                           \
       method.type = METHOD_FUNCTION_CALL;                                      \
       method.as.primitive = prim_##function;                                   \

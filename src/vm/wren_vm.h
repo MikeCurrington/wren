@@ -31,25 +31,57 @@ typedef enum
   #undef OPCODE
 } Code;
 
+class WrenVM;
+
 // A handle to a value, basically just a linked list of extra GC roots.
 //
 // Note that even non-heap-allocated values can be stored here.
-struct WrenHandle
+class WrenHandle
 {
+public:
+  WrenHandle(const WrenHandle&) = delete;
+  WrenHandle& operator=(const WrenHandle&) = delete;
+  WrenHandle(WrenHandle&&) = delete;
+  WrenHandle& operator=(WrenHandle&&) = delete;
+
+  // Creates a handle for [value] and links it into the VM's list of handles,
+  // making the value reachable by the garbage collector. Defined in
+  // wren_vm.cpp; the memory must come from ALLOCATE(), since like all Wren
+  // objects a handle is never destructed -- wrenReleaseHandle() unlinks it
+  // and frees it through the VM's allocator.
+  WrenHandle(WrenVM* vm, Value value);
+
+  // Internal state: read directly by the VM's implementation (handle list
+  // management and the garbage collector).
   Value value {};
 
   WrenHandle* prev = nullptr;
   WrenHandle* next = nullptr;
 };
 
-// A saved API slot region, used to call back into Wren from inside a foreign
+// A saved region of API slots, used to re-enter the VM from within a foreign
 // method. Created by wrenBeginCall() and destroyed by wrenEndCall().
 //
 // The base of the saved slot region is stored as an index into the fiber's
 // stack rather than a pointer because the stack can be reallocated (moving)
 // while the nested code runs.
-struct WrenCallContext
+class WrenCallContext
 {
+public:
+  WrenCallContext(const WrenCallContext&) = delete;
+  WrenCallContext& operator=(const WrenCallContext&) = delete;
+  WrenCallContext(WrenCallContext&&) = delete;
+  WrenCallContext& operator=(WrenCallContext&&) = delete;
+
+  // Saves the current fiber and its slot region and pushes this context onto
+  // the VM's stack of nested calls. Defined in wren_vm.cpp; the memory must
+  // come from ALLOCATE(), since the context is never destructed --
+  // wrenEndCall() pops it and frees it through the VM's allocator.
+  WrenCallContext(WrenVM* vm);
+
+  // Internal state: read directly by the VM's implementation (nested call
+  // management and the garbage collector).
+
   // The fiber whose slot region was current when wrenBeginCall() was called.
   // This is the fiber that is suspended in the foreign method. It is kept
   // alive (and its stack scanned) by the GC while the nested code runs.

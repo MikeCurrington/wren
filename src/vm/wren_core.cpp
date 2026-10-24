@@ -131,7 +131,7 @@ static bool runFiber(WrenVM* vm, ObjFiber* fiber, Value* args, bool isCall,
   if (hasValue) vm->fiber->stackTop--;
 
   if (fiber->numFrames == 1 &&
-      fiber->frames[0].ip == fiber->frames[0].closure->fn->code.data)
+      fiber->frames[0].ip == fiber->frames[0].closure->fn->code.data())
   {
     // The fiber is being started for the first time. If its function takes a
     // parameter, bind an argument to it.
@@ -356,7 +356,7 @@ DEF_PRIMITIVE(list_filled)
   
   for (uint32_t i = 0; i < size; i++)
   {
-    list->elements.data[i] = args[2];
+    list->elements[i] = args[2];
   }
   
   RETURN_OBJ(list);
@@ -369,7 +369,7 @@ DEF_PRIMITIVE(list_new)
 
 DEF_PRIMITIVE(list_add)
 {
-  AS_LIST(args[0])->elements.write(vm, args[1]);
+  AS_LIST(args[0])->elements.push_back(args[1]);
   RETURN_VAL(args[1]);
 }
 
@@ -378,7 +378,7 @@ DEF_PRIMITIVE(list_add)
 // minimize stack churn.
 DEF_PRIMITIVE(list_addCore)
 {
-  AS_LIST(args[0])->elements.write(vm, args[1]);
+  AS_LIST(args[0])->elements.push_back(args[1]);
   
   // Return the list.
   RETURN_VAL(args[0]);
@@ -386,13 +386,13 @@ DEF_PRIMITIVE(list_addCore)
 
 DEF_PRIMITIVE(list_clear)
 {
-  AS_LIST(args[0])->elements.clear(vm);
+  AS_LIST(args[0])->elements.clear();
   RETURN_NULL;
 }
 
 DEF_PRIMITIVE(list_count)
 {
-  RETURN_NUM(AS_LIST(args[0])->elements.count);
+  RETURN_NUM(AS_LIST(args[0])->elements.size());
 }
 
 DEF_PRIMITIVE(list_insert)
@@ -400,7 +400,7 @@ DEF_PRIMITIVE(list_insert)
   ObjList* list = AS_LIST(args[0]);
 
   // count + 1 here so you can "insert" at the very end.
-  uint32_t index = validateIndex(vm, args[1], list->elements.count + 1,
+  uint32_t index = validateIndex(vm, args[1], list->elements.size() + 1,
                                  "Index");
   if (index == UINT32_MAX) return false;
 
@@ -415,7 +415,7 @@ DEF_PRIMITIVE(list_iterate)
   // If we're starting the iteration, return the first index.
   if (IS_NULL(args[1]))
   {
-    if (list->elements.count == 0) RETURN_FALSE;
+    if (list->elements.size() == 0) RETURN_FALSE;
     RETURN_NUM(0);
   }
 
@@ -423,7 +423,7 @@ DEF_PRIMITIVE(list_iterate)
 
   // Stop if we're out of bounds.
   double index = AS_NUM(args[1]);
-  if (index < 0 || index >= list->elements.count - 1) RETURN_FALSE;
+  if (index < 0 || index >= list->elements.size() - 1) RETURN_FALSE;
 
   // Otherwise, move to the next index.
   RETURN_NUM(index + 1);
@@ -432,16 +432,16 @@ DEF_PRIMITIVE(list_iterate)
 DEF_PRIMITIVE(list_iteratorValue)
 {
   ObjList* list = AS_LIST(args[0]);
-  uint32_t index = validateIndex(vm, args[1], list->elements.count, "Iterator");
+  uint32_t index = validateIndex(vm, args[1], list->elements.size(), "Iterator");
   if (index == UINT32_MAX) return false;
 
-  RETURN_VAL(list->elements.data[index]);
+  RETURN_VAL(list->elements[index]);
 }
 
 DEF_PRIMITIVE(list_removeAt)
 {
   ObjList* list = AS_LIST(args[0]);
-  uint32_t index = validateIndex(vm, args[1], list->elements.count, "Index");
+  uint32_t index = validateIndex(vm, args[1], list->elements.size(), "Index");
   if (index == UINT32_MAX) return false;
 
   RETURN_VAL(wrenListRemoveAt(vm, list, index));
@@ -450,14 +450,14 @@ DEF_PRIMITIVE(list_removeAt)
 DEF_PRIMITIVE(list_swap)
 {
   ObjList* list = AS_LIST(args[0]);
-  uint32_t indexA = validateIndex(vm, args[1], list->elements.count, "Index 0");
+  uint32_t indexA = validateIndex(vm, args[1], list->elements.size(), "Index 0");
   if (indexA == UINT32_MAX) return false;
-  uint32_t indexB = validateIndex(vm, args[2], list->elements.count, "Index 1");
+  uint32_t indexB = validateIndex(vm, args[2], list->elements.size(), "Index 1");
   if (indexB == UINT32_MAX) return false;
 
-  Value a = list->elements.data[indexA];
-  list->elements.data[indexA] = list->elements.data[indexB];
-  list->elements.data[indexB] = a;
+  Value a = list->elements[indexA];
+  list->elements[indexA] = list->elements[indexB];
+  list->elements[indexB] = a;
 
   RETURN_NULL;
 }
@@ -468,11 +468,11 @@ DEF_PRIMITIVE(list_subscript)
 
   if (IS_NUM(args[1]))
   {
-    uint32_t index = validateIndex(vm, args[1], list->elements.count,
+    uint32_t index = validateIndex(vm, args[1], list->elements.size(),
                                    "Subscript");
     if (index == UINT32_MAX) return false;
 
-    RETURN_VAL(list->elements.data[index]);
+    RETURN_VAL(list->elements[index]);
   }
 
   if (!IS_RANGE(args[1]))
@@ -481,14 +481,14 @@ DEF_PRIMITIVE(list_subscript)
   }
 
   int step;
-  uint32_t count = list->elements.count;
+  uint32_t count = list->elements.size();
   uint32_t start = calculateRange(vm, AS_RANGE(args[1]), &count, &step);
   if (start == UINT32_MAX) return false;
 
   ObjList* result = wrenConstruct<ObjList>(vm, 0, count);
   for (uint32_t i = 0; i < count; i++)
   {
-    result->elements.data[i] = list->elements.data[start + i * step];
+    result->elements[i] = list->elements[start + i * step];
   }
 
   RETURN_OBJ(result);
@@ -497,11 +497,11 @@ DEF_PRIMITIVE(list_subscript)
 DEF_PRIMITIVE(list_subscriptSetter)
 {
   ObjList* list = AS_LIST(args[0]);
-  uint32_t index = validateIndex(vm, args[1], list->elements.count,
+  uint32_t index = validateIndex(vm, args[1], list->elements.size(),
                                  "Subscript");
   if (index == UINT32_MAX) return false;
 
-  list->elements.data[index] = args[2];
+  list->elements[index] = args[2];
   RETURN_VAL(args[2]);
 }
 

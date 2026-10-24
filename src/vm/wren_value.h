@@ -743,7 +743,7 @@ static inline void wrenAppendCallFrame(WrenVM* vm, ObjFiber* fiber,
   CallFrame* frame = &fiber->frames[fiber->numFrames++];
   frame->stackStart = stackStart;
   frame->closure = closure;
-  frame->ip = closure->fn->code.data;
+  frame->ip = closure->fn->code.data();
   frame->debugLastLine = -1;
   frame->debugLastOffset = -1;
 }

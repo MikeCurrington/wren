@@ -368,7 +368,7 @@ struct sCompiler
 
   // The number of attributes seen while parsing.
   // We track this separately as compile time attributes
-  // are not stored, so we can't rely on attributes->count
+  // are not stored, so we can't rely on attributes->count()
   // to enforce an error message when attributes are used
   // anywhere other than methods or classes.
   int numAttributes;
@@ -500,18 +500,31 @@ static int addConstant(Compiler* compiler, Value constant)
   }
   
   // It's a new constant.
-  if (compiler->fn->constants.count < MAX_CONSTANTS)
+#if 1
+  if (compiler->fn->constants.size() < MAX_CONSTANTS)
+#else
+  if (compiler->fn->constants.size() < MAX_CONSTANTS)
+#endif
   {
     if (IS_OBJ(constant)) wrenPushRoot(compiler->parser->vm, AS_OBJ(constant));
-    compiler->fn->constants.write(compiler->parser->vm, constant);
+#if 1
+    compiler->fn->constants.push_back(constant);
+#else
+    compiler->fn->constants.push_back(constant);
+#endif
     if (IS_OBJ(constant)) wrenPopRoot(compiler->parser->vm);
     
     if (compiler->constants == nullptr)
     {
       compiler->constants = wrenConstruct<ObjMap>(compiler->parser->vm, 0);
     }
+#if 1
     wrenMapSet(compiler->parser->vm, compiler->constants, constant,
-               NUM_VAL(compiler->fn->constants.count - 1));
+               NUM_VAL(compiler->fn->constants.size() - 1));
+#else
+    wrenMapSet(compiler->parser->vm, compiler->constants, constant,
+               NUM_VAL(compiler->fn->constants.size() - 1));
+#endif
   }
   else
   {
@@ -519,7 +532,11 @@ static int addConstant(Compiler* compiler, Value constant)
           MAX_CONSTANTS);
   }
 
-  return compiler->fn->constants.count - 1;
+#if 1
+  return compiler->fn->constants.size() - 1;
+#else
+  return compiler->fn->constants.size() - 1;
+#endif
 }
 
 // Records that stack slot [slot] in the function being compiled is named
@@ -529,7 +546,11 @@ static void addLocalDebugName(Compiler* compiler, int slot, const char* name,
                               int length)
 {
   LocalDebugName entry;
-  entry.offset = compiler->fn->code.count;
+#if 1
+  entry.offset = compiler->fn->code.size();
+#else
+  entry.offset = compiler->fn->code.size();
+#endif
   entry.slot = slot;
   if (name == nullptr)
   {
@@ -541,7 +562,11 @@ static void addLocalDebugName(Compiler* compiler, int slot, const char* name,
     memcpy(entry.name, name, length);
     entry.name[length] = '\0';
   }
-  compiler->fn->debug->localNames.write(compiler->parser->vm, entry);
+#if 1
+  compiler->fn->debug->localNames.push_back(entry);
+#else
+  compiler->fn->debug->localNames.push_back(entry);
+#endif
 }
 
 // Initializes [compiler].
@@ -844,13 +869,13 @@ static void readNumber(Parser* parser)
 static void readName(Parser* parser, TokenType type, char firstChar)
 {
   ByteBuffer string;
-  string.init();
-  string.write(parser->vm, firstChar);
+  string.clear();
+  string.push_back(firstChar);
 
   while (isName(peekChar(parser)) || isDigit(peekChar(parser)))
   {
     char c = nextChar(parser);
-    string.write(parser->vm, c);
+    string.push_back(c);
   }
 
   // Update the type if it's a keyword.
@@ -866,9 +891,9 @@ static void readName(Parser* parser, TokenType type, char firstChar)
   }
   
   parser->next.value = wrenNewStringLength(parser->vm,
-                                            (char*)string.data, string.count);
+                                            (char*)string.data(), string.size());
 
-  string.clear(parser->vm);
+  string.clear();
   makeToken(parser, type);
 }
 
@@ -910,15 +935,20 @@ static void readUnicodeEscape(Parser* parser, ByteBuffer* string, int length)
   int numBytes = wrenUtf8EncodeNumBytes(value);
   if (numBytes != 0)
   {
+#if 1
+    std::fill_n(std::back_inserter(*string), numBytes, 0);
+    wrenUtf8Encode(value, string->data() + string->size() - numBytes);
+#else
     string->fill(parser->vm, 0, numBytes);
-    wrenUtf8Encode(value, string->data + string->count - numBytes);
+    wrenUtf8Encode(value, string->data() + string->size() - numBytes);
+#endif
   }
 }
 
 static void readRawString(Parser* parser)
 {
   ByteBuffer string;
-  string.init();
+  string.clear();
   TokenType type = TOKEN_STRING;
 
   //consume the second and third "
@@ -940,9 +970,9 @@ static void readRawString(Parser* parser)
     if (c == '\r') continue;
 
     if (c == '\n') {
-      lastNewline = string.count;
+      lastNewline = string.size();
       skipEnd = lastNewline;
-      firstNewline = firstNewline == -1 ? string.count : firstNewline;
+      firstNewline = firstNewline == -1 ? string.size() : firstNewline;
     }
 
     if (c == '"' && c1 == '"' && c2 == '"') break;
@@ -954,7 +984,7 @@ static void readRawString(Parser* parser)
     // and still seeing whitespace, count the characters 
     // as skippable till we know otherwise
     bool skippable = skipStart != -1 && isWhitespace && firstNewline == -1;
-    skipStart = skippable ? string.count + 1 : skipStart;
+    skipStart = skippable ? string.size() + 1 : skipStart;
     
     // We've counted leading whitespace till we hit something else, 
     // but it's not a newline, so we reset skipStart since we need these characters
@@ -970,7 +1000,7 @@ static void readRawString(Parser* parser)
       break;
     }
  
-    string.write(parser->vm, c);
+    string.push_back(c);
   }
 
   //consume the second and third "
@@ -978,7 +1008,7 @@ static void readRawString(Parser* parser)
   nextChar(parser);
 
   int offset = 0;
-  int count = string.count;
+  int count = string.size();
 
   if(firstNewline != -1 && skipStart == firstNewline) offset = firstNewline + 1;
   if(lastNewline != -1 && skipEnd == lastNewline) count = lastNewline;
@@ -986,9 +1016,9 @@ static void readRawString(Parser* parser)
   count -= (offset > count) ? count : offset;
 
   parser->next.value = wrenNewStringLength(parser->vm, 
-                         ((char*)string.data) + offset, count);
+                         ((char*)string.data()) + offset, count);
   
-  string.clear(parser->vm);
+  string.clear();
   makeToken(parser, type);
 }
 
@@ -997,7 +1027,7 @@ static void readString(Parser* parser)
 {
   ByteBuffer string;
   TokenType type = TOKEN_STRING;
-  string.init();
+  string.clear();
   
   for (;;)
   {
@@ -1035,22 +1065,23 @@ static void readString(Parser* parser)
     {
       switch (nextChar(parser))
       {
-        case '"':  string.write(parser->vm, '"'); break;
-        case '\\': string.write(parser->vm, '\\'); break;
-        case '%':  string.write(parser->vm, '%'); break;
-        case '0':  string.write(parser->vm, '\0'); break;
-        case 'a':  string.write(parser->vm, '\a'); break;
-        case 'b':  string.write(parser->vm, '\b'); break;
-        case 'e':  string.write(parser->vm, '\33'); break;
-        case 'f':  string.write(parser->vm, '\f'); break;
-        case 'n':  string.write(parser->vm, '\n'); break;
-        case 'r':  string.write(parser->vm, '\r'); break;
-        case 't':  string.write(parser->vm, '\t'); break;
+#if 1
+        case '"':  string.push_back('"'); break;
+        case '\\': string.push_back('\\'); break;
+        case '%':  string.push_back('%'); break;
+        case '0':  string.push_back('\0'); break;
+        case 'a':  string.push_back('\a'); break;
+        case 'b':  string.push_back('\b'); break;
+        case 'e':  string.push_back('\33'); break;
+        case 'f':  string.push_back('\f'); break;
+        case 'n':  string.push_back('\n'); break;
+        case 'r':  string.push_back('\r'); break;
+        case 't':  string.push_back('\t'); break;
         case 'u':  readUnicodeEscape(parser, &string, 4); break;
         case 'U':  readUnicodeEscape(parser, &string, 8); break;
-        case 'v':  string.write(parser->vm, '\v'); break;
+        case 'v':  string.push_back('\v'); break;
         case 'x':
-          string.write(parser->vm, (uint8_t)readHexEscape(parser, 2, "byte"));
+          string.push_back((uint8_t)readHexEscape(parser, 2, "byte"));
           break;
 
         default:
@@ -1061,14 +1092,40 @@ static void readString(Parser* parser)
     }
     else
     {
-      string.write(parser->vm, c);
+      string.push_back(c);
     }
   }
+#else
+        case '"':  string.push_back('"'); break;
+        case '\\': string.push_back('\\'); break;
+        case '%':  string.push_back('%'); break;
+        case '0':  string.push_back('\0'); break;
+        case 'a':  string.push_back('\a'); break;
+        case 'b':  string.push_back('\b'); break;
+        case 'e':  string.push_back('\33'); break;
+        case 'f':  string.push_back('\f'); break;
+        case 'n':  string.push_back('\n'); break;
+        case 'r':  string.push_back('\r'); break;
+        case 't':  string.push_back('\t'); break;
+        case 'u':  readUnicodeEscape(parser, &string, 4); break;
+        case 'U':  readUnicodeEscape(parser, &string, 8); break;
+        case 'v':  string.push_back('\v'); break;
+        case 'x':
+          string.push_back((uint8_t)readHexEscape(parser, 2, "byte"));
+          break;
+      }
+    }
+    else
+    {
+      string.push_back(c);
+    }
+  }
+#endif
 
   parser->next.value = wrenNewStringLength(parser->vm,
-                                              (char*)string.data, string.count);
+                                              (char*)string.data(), string.size());
   
-  string.clear(parser->vm);
+  string.clear();
   makeToken(parser, type);
 }
 
@@ -1336,12 +1393,12 @@ static void allowLineBeforeDot(Compiler* compiler) {
 // Emits one single-byte argument. Returns its index.
 static int emitByte(Compiler* compiler, int byte)
 {
-  compiler->fn->code.write(compiler->parser->vm, (uint8_t)byte);
+  compiler->fn->code.push_back((uint8_t)byte);
   
   // Assume the instruction is associated with the most recently consumed token.
-  compiler->fn->debug->sourceLines.write(compiler->parser->vm, compiler->parser->previous.line);
+  compiler->fn->debug->sourceLines.push_back(compiler->parser->previous.line);
   
-  return compiler->fn->code.count - 1;
+  return compiler->fn->code.size() - 1;
 }
 
 // Emits one bytecode instruction.
@@ -1670,7 +1727,7 @@ static Variable resolveName(Compiler* compiler, const char* name, int length)
   if (variable.index != -1) return variable;
 
   variable.scope = SCOPE_MODULE;
-  variable.index = wrenSymbolTableFind(&compiler->parser->module->variableNames,
+  variable.index = compiler->parser->module->variableNames.find(
                                        name, length);
   return variable;
 }
@@ -1787,11 +1844,11 @@ static void parsePrecedence(Compiler* compiler, Precedence precedence);
 static void patchJump(Compiler* compiler, int offset)
 {
   // -2 to adjust for the bytecode for the jump offset itself.
-  int jump = compiler->fn->code.count - offset - 2;
+  int jump = compiler->fn->code.size() - offset - 2;
   if (jump > MAX_JUMP) error(compiler, "Too much code to jump over.");
 
-  compiler->fn->code.data[offset] = (jump >> 8) & 0xff;
-  compiler->fn->code.data[offset + 1] = jump & 0xff;
+  compiler->fn->code[offset] = (jump >> 8) & 0xff;
+  compiler->fn->code[offset + 1] = jump & 0xff;
 }
 
 // Parses a block body, after the initial "{" has been consumed.
@@ -1883,8 +1940,7 @@ static void finishParameterList(Compiler* compiler, Signature* signature)
 // Gets the symbol for a method [name] with [length].
 static int methodSymbol(Compiler* compiler, const char* name, int length)
 {
-  int symbol = wrenSymbolTableEnsure(compiler->parser->vm,
-      &compiler->parser->vm->methodNames, name, length);
+  int symbol = compiler->parser->vm->methodNames.ensure(compiler->parser->vm, name, length);
 
   if (symbol > MAX_METHODS) {
     error(compiler, "Method limit of %d reached.", MAX_METHODS);
@@ -2166,7 +2222,7 @@ static void loadThis(Compiler* compiler)
 // Pushes the value for a module-level variable implicitly imported from core.
 static void loadCoreVariable(Compiler* compiler, const char* name)
 {
-  int symbol = wrenSymbolTableFind(&compiler->parser->module->variableNames,
+  int symbol = compiler->parser->module->variableNames.find(
                                    name, strlen(name));
   ASSERT(symbol != -1, "Should have already defined core name.");
   emitShortArg(compiler, CODE_LOAD_MODULE_VAR, symbol);
@@ -2299,7 +2355,7 @@ static void field(Compiler* compiler, bool canAssign)
   else
   {
     // Look up the field, or implicitly define it.
-    field = wrenSymbolTableEnsure(compiler->parser->vm, &enclosingClass->fields,
+    field = enclosingClass->fields.ensure(compiler->parser->vm,
         compiler->parser->previous.start,
         compiler->parser->previous.length);
 
@@ -2429,7 +2485,7 @@ static void name(Compiler* compiler, bool canAssign)
 
   // Otherwise, look for a module-level variable with the name.
   variable.scope = SCOPE_MODULE;
-  variable.index = wrenSymbolTableFind(&compiler->parser->module->variableNames,
+  variable.index = compiler->parser->module->variableNames.find(
                                        token->start, token->length);
   if (variable.index == -1)
   {
@@ -3005,7 +3061,7 @@ static int getByteCountForArguments(const uint8_t* bytecode,
 static void startLoop(Compiler* compiler, Loop* loop)
 {
   loop->enclosing = compiler->loop;
-  loop->start = compiler->fn->code.count - 1;
+  loop->start = compiler->fn->code.size() - 1;
   loop->scopeDepth = compiler->scopeDepth;
   compiler->loop = loop;
 }
@@ -3022,7 +3078,7 @@ static void testExitLoop(Compiler* compiler)
 // statements can be handled correctly.
 static void loopBody(Compiler* compiler)
 {
-  compiler->loop->body = compiler->fn->code.count;
+  compiler->loop->body = compiler->fn->code.size();
   statement(compiler);
 }
 
@@ -3032,7 +3088,7 @@ static void endLoop(Compiler* compiler)
 {
   // We don't check for overflow here since the forward jump over the loop body
   // will report an error for the same problem.
-  int loopOffset = compiler->fn->code.count - compiler->loop->start + 2;
+  int loopOffset = compiler->fn->code.size() - compiler->loop->start + 2;
   emitShortArg(compiler, CODE_LOOP, loopOffset);
 
   patchJump(compiler, compiler->loop->exitJump);
@@ -3040,19 +3096,19 @@ static void endLoop(Compiler* compiler)
   // Find any break placeholder instructions (which will be CODE_END in the
   // bytecode) and replace them with real jumps.
   int i = compiler->loop->body;
-  while (i < compiler->fn->code.count)
+  while (i < compiler->fn->code.size())
   {
-    if (compiler->fn->code.data[i] == CODE_END)
+    if (compiler->fn->code[i] == CODE_END)
     {
-      compiler->fn->code.data[i] = CODE_JUMP;
+      compiler->fn->code[i] = CODE_JUMP;
       patchJump(compiler, i + 1);
       i += 3;
     }
     else
     {
       // Skip this instruction and its arguments.
-      i += 1 + getByteCountForArguments(compiler->fn->code.data,
-                               compiler->fn->constants.data, i);
+      i += 1 + getByteCountForArguments(compiler->fn->code.data(),
+                               compiler->fn->constants.data(), i);
     }
   }
 
@@ -3243,7 +3299,7 @@ void statement(Compiler* compiler)
     discardLocals(compiler, compiler->loop->scopeDepth + 1);
 
     // emit a jump back to the top of the loop
-    int loopOffset = compiler->fn->code.count - compiler->loop->start + 2;
+    int loopOffset = compiler->fn->code.size() - compiler->loop->start + 2;
     emitShortArg(compiler, CODE_LOOP, loopOffset);
   }
   else if (match(compiler, TOKEN_FOR))
@@ -3363,9 +3419,9 @@ static int declareMethod(Compiler* compiler, Signature* signature,
   ClassInfo* classInfo = compiler->enclosingClass;
   IntBuffer* methods = classInfo->inStatic
       ? &classInfo->staticMethods : &classInfo->methods;
-  for (int i = 0; i < methods->count; i++)
+  for (int i = 0; i < methods->size(); i++)
   {
-    if (methods->data[i] == symbol)
+    if ((*methods)[i] == symbol)
     {
       const char* staticPrefix = classInfo->inStatic ? "static " : "";
       error(compiler, "Class %s already defines a %smethod '%s'.",
@@ -3374,7 +3430,7 @@ static int declareMethod(Compiler* compiler, Signature* signature,
     }
   }
   
-  methods->write(compiler->parser->vm, symbol);
+  methods->push_back(symbol);
   return symbol;
 }
 
@@ -3613,11 +3669,9 @@ static void classDefinition(Compiler* compiler, bool isForeign)
   // them to slots starting at zero. When the method is bound to the class, the
   // bytecode will be adjusted by [wrenBindMethod] to take inherited fields
   // into account.
-  wrenSymbolTableInit(&classInfo.fields);
-  
   // Set up symbol buffers to track duplicate static and instance methods.
-  classInfo.methods.init();
-  classInfo.staticMethods.init();
+  // classInfo is a stack local, so its symbol table and vectors construct
+  // themselves.
   compiler->enclosingClass = &classInfo;
 
   // Compile the method definitions.
@@ -3651,21 +3705,19 @@ static void classDefinition(Compiler* compiler, bool isForeign)
   // Update the class with the number of fields.
   if (!isForeign)
   {
-    compiler->fn->code.data[numFieldsInstruction] =
-        (uint8_t)classInfo.fields.count;
+    compiler->fn->code[numFieldsInstruction] =
+        (uint8_t)classInfo.fields.count();
   }
 
   // Remember the field names for the debugger.
-  if (!isForeign && classInfo.fields.count > 0)
+  if (!isForeign && classInfo.fields.count() > 0)
   {
     wrenDebugRecordClassFields(compiler->parser->vm, className->value,
                                &classInfo.fields);
   }
 
-  // Clear symbol tables for tracking field and method names.
-  wrenSymbolTableClear(compiler->parser->vm, &classInfo.fields);
-  classInfo.methods.clear(compiler->parser->vm);
-  classInfo.staticMethods.clear(compiler->parser->vm);
+  // Clear symbol tables for tracking field and method names. The vectors in
+  // the stack-local classInfo free themselves when it goes out of scope.
   compiler->enclosingClass = nullptr;
   popScope(compiler);
 }
@@ -3835,7 +3887,7 @@ ObjFn* wrenCompile(WrenVM* vm, ObjModule* module, const char* source,
   // Copy next -> current
   nextToken(&parser);
 
-  int numExistingVariables = module->variables.count;
+  int numExistingVariables = module->variables.size();
 
   Compiler compiler;
   initCompiler(&compiler, &parser, nullptr, false);
@@ -3868,15 +3920,15 @@ ObjFn* wrenCompile(WrenVM* vm, ObjModule* module, const char* source,
   // See if there are any implicitly declared module-level variables that never
   // got an explicit definition. They will have values that are numbers
   // indicating the line where the variable was first used.
-  for (int i = numExistingVariables; i < parser.module->variables.count; i++)
+  for (int i = numExistingVariables; i < parser.module->variables.size(); i++)
   {
-    if (IS_NUM(parser.module->variables.data[i]))
+    if (IS_NUM(parser.module->variables[i]))
     {
       // Synthesize a token for the original use site.
       parser.previous.type = TOKEN_NAME;
-      parser.previous.start = parser.module->variableNames.data[i]->value;
-      parser.previous.length = parser.module->variableNames.data[i]->length;
-      parser.previous.line = (int)AS_NUM(parser.module->variables.data[i]);
+      parser.previous.start = parser.module->variableNames[i]->value;
+      parser.previous.length = parser.module->variableNames[i]->length;
+      parser.previous.line = (int)AS_NUM(parser.module->variables[i]);
       error(&compiler, "Variable is used but not defined.");
     }
   }
@@ -3889,7 +3941,7 @@ void wrenBindMethodCode(ObjClass* classObj, ObjFn* fn)
   int ip = 0;
   for (;;)
   {
-    Code instruction = (Code)fn->code.data[ip];
+    Code instruction = (Code)fn->code[ip];
     switch (instruction)
     {
       case CODE_LOAD_FIELD:
@@ -3899,7 +3951,7 @@ void wrenBindMethodCode(ObjClass* classObj, ObjFn* fn)
         // Shift this class's fields down past the inherited ones. We don't
         // check for overflow here because we'll see if the number of fields
         // overflows when the subclass is created.
-        fn->code.data[ip + 1] += classObj->superclass->numFields;
+        fn->code[ip + 1] += classObj->superclass->numFields;
         break;
 
       case CODE_SUPER_0:
@@ -3921,16 +3973,16 @@ void wrenBindMethodCode(ObjClass* classObj, ObjFn* fn)
       case CODE_SUPER_16:
       {
         // Fill in the constant slot with a reference to the superclass.
-        int constant = (fn->code.data[ip + 3] << 8) | fn->code.data[ip + 4];
-        fn->constants.data[constant] = OBJ_VAL(classObj->superclass);
+        int constant = (fn->code[ip + 3] << 8) | fn->code[ip + 4];
+        fn->constants[constant] = OBJ_VAL(classObj->superclass);
         break;
       }
 
       case CODE_CLOSURE:
       {
         // Bind the nested closure too.
-        int constant = (fn->code.data[ip + 1] << 8) | fn->code.data[ip + 2];
-        wrenBindMethodCode(classObj, AS_FN(fn->constants.data[constant]));
+        int constant = (fn->code[ip + 1] << 8) | fn->code[ip + 2];
+        wrenBindMethodCode(classObj, AS_FN(fn->constants[constant]));
         break;
       }
 
@@ -3941,7 +3993,7 @@ void wrenBindMethodCode(ObjClass* classObj, ObjFn* fn)
         // Other instructions are unaffected, so just skip over them.
         break;
     }
-    ip += 1 + getByteCountForArguments(fn->code.data, fn->constants.data, ip);
+    ip += 1 + getByteCountForArguments(fn->code.data(), fn->constants.data(), ip);
   }
 }
 
@@ -3961,7 +4013,7 @@ void wrenMarkCompiler(WrenVM* vm, Compiler* compiler)
     
     if (compiler->enclosingClass != nullptr)
     {
-      wrenBlackenSymbolTable(vm, &compiler->enclosingClass->fields);
+      compiler->enclosingClass->fields.blacken(vm);
 
       if(compiler->enclosingClass->methodAttributes != nullptr) 
       {
@@ -4024,7 +4076,7 @@ static void addToAttributeGroup(Compiler* compiler,
 
   //keyItems.add(value)
   ObjList* keyItems = AS_LIST(keyItemsValue);
-  keyItems->elements.write(vm, value);
+  keyItems->elements.push_back(value);
 
   if(IS_OBJ(group)) wrenPopRoot(vm);
   if(IS_OBJ(key))   wrenPopRoot(vm);
@@ -4064,9 +4116,9 @@ static void emitAttributes(Compiler* compiler, ObjMap* attributes)
       callMethod(compiler, 0, "new()", 5);
       // Add the items to the key list
       ObjList* items = AS_LIST(itemEntry->value);
-      for(int itemIdx = 0; itemIdx < items->elements.count; ++itemIdx)
+      for(int itemIdx = 0; itemIdx < items->elements.size(); ++itemIdx)
       {
-        emitConstant(compiler, items->elements.data[itemIdx]);
+        emitConstant(compiler, items->elements[itemIdx]);
         callMethod(compiler, 1, "addCore_(_)", 11);
       }
       // Add the list to the map

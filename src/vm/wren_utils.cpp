@@ -3,61 +3,48 @@
 #include "wren_utils.h"
 #include "wren_vm.h"
 
-void wrenSymbolTableInit(SymbolTable* symbols)
-{
-  symbols->init();
-}
-
-void wrenSymbolTableClear(WrenVM* vm, SymbolTable* symbols)
-{
-  symbols->clear(vm);
-}
-
-int wrenSymbolTableAdd(WrenVM* vm, SymbolTable* symbols,
-                       const char* name, size_t length)
+int SymbolTable::add(WrenVM* vm, const char* name, size_t length)
 {
   ObjString* symbol = AS_STRING(wrenNewStringLength(vm, name, length));
-  
+
   wrenPushRoot(vm, symbol);
-  symbols->write(vm, symbol);
+  buffer_.push_back(symbol);
   wrenPopRoot(vm);
-  
-  return symbols->count - 1;
+
+  return buffer_.size() - 1;
 }
 
-int wrenSymbolTableEnsure(WrenVM* vm, SymbolTable* symbols,
-                          const char* name, size_t length)
+int SymbolTable::ensure(WrenVM* vm, const char* name, size_t length)
 {
   // See if the symbol is already defined.
-  int existing = wrenSymbolTableFind(symbols, name, length);
+  int existing = find(name, length);
   if (existing != -1) return existing;
 
   // New symbol, so add it.
-  return wrenSymbolTableAdd(vm, symbols, name, length);
+  return add(vm, name, length);
 }
 
-int wrenSymbolTableFind(const SymbolTable* symbols,
-                        const char* name, size_t length)
+int SymbolTable::find(const char* name, size_t length) const
 {
   // See if the symbol is already defined.
   // TODO: O(n). Do something better.
-  for (int i = 0; i < symbols->count; i++)
+  for (int i = 0; i < buffer_.size(); i++)
   {
-    if (wrenStringEqualsCString(symbols->data[i], name, length)) return i;
+    if (wrenStringEqualsCString(buffer_[i], name, length)) return i;
   }
 
   return -1;
 }
 
-void wrenBlackenSymbolTable(WrenVM* vm, SymbolTable* symbolTable)
+void SymbolTable::blacken(WrenVM* vm)
 {
-  for (int i = 0; i < symbolTable->count; i++)
+  for (int i = 0; i < buffer_.size(); i++)
   {
-    wrenGrayObj(vm, symbolTable->data[i]);
+    wrenGrayObj(vm, buffer_[i]);
   }
-  
+
   // Keep track of how much memory is still in use.
-  vm->bytesAllocated += symbolTable->capacity * sizeof(*symbolTable->data);
+  vm->bytesAllocated += buffer_.capacity() * sizeof(ObjString*);
 }
 
 int wrenUtf8EncodeNumBytes(int value)
