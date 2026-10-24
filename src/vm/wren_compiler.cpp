@@ -502,31 +502,18 @@ static int addConstant(Compiler* compiler, Value constant)
   }
   
   // It's a new constant.
-#if 1
   if (compiler->fn->constants.size() < MAX_CONSTANTS)
-#else
-  if (compiler->fn->constants.size() < MAX_CONSTANTS)
-#endif
   {
     if (IS_OBJ(constant)) wrenPushRoot(compiler->parser->vm, AS_OBJ(constant));
-#if 1
     compiler->fn->constants.push_back(constant);
-#else
-    compiler->fn->constants.push_back(constant);
-#endif
     if (IS_OBJ(constant)) wrenPopRoot(compiler->parser->vm);
     
     if (compiler->constants == nullptr)
     {
       compiler->constants = wrenConstruct<ObjMap>(compiler->parser->vm, 0);
     }
-#if 1
     wrenMapSet(compiler->parser->vm, compiler->constants, constant,
                NUM_VAL(compiler->fn->constants.size() - 1));
-#else
-    wrenMapSet(compiler->parser->vm, compiler->constants, constant,
-               NUM_VAL(compiler->fn->constants.size() - 1));
-#endif
   }
   else
   {
@@ -534,11 +521,7 @@ static int addConstant(Compiler* compiler, Value constant)
           MAX_CONSTANTS);
   }
 
-#if 1
   return compiler->fn->constants.size() - 1;
-#else
-  return compiler->fn->constants.size() - 1;
-#endif
 }
 
 // Records that stack slot [slot] in the function being compiled is named
@@ -548,11 +531,7 @@ static void addLocalDebugName(Compiler* compiler, int slot, const char* name,
                               int length)
 {
   LocalDebugName entry;
-#if 1
   entry.offset = compiler->fn->code.size();
-#else
-  entry.offset = compiler->fn->code.size();
-#endif
   entry.slot = slot;
   if (name == nullptr)
   {
@@ -564,11 +543,7 @@ static void addLocalDebugName(Compiler* compiler, int slot, const char* name,
     memcpy(entry.name, name, length);
     entry.name[length] = '\0';
   }
-#if 1
   compiler->fn->debug->localNames.push_back(entry);
-#else
-  compiler->fn->debug->localNames.push_back(entry);
-#endif
 }
 
 // Initializes [compiler].
@@ -935,14 +910,9 @@ static void readUnicodeEscape(Parser* parser, std::string* string, int length)
   int numBytes = wrenUtf8EncodeNumBytes(value);
   if (numBytes != 0)
   {
-#if 1
     std::fill_n(std::back_inserter(*string), numBytes, 0);
     wrenUtf8Encode(value,
                    (uint8_t*)string->data() + string->size() - numBytes);
-#else
-    string->fill(parser->vm, 0, numBytes);
-    wrenUtf8Encode(value, string->data() + string->size() - numBytes);
-#endif
   }
 }
 
@@ -1063,7 +1033,6 @@ static void readString(Parser* parser)
     {
       switch (nextChar(parser))
       {
-#if 1
         case '"':  string.push_back('"'); break;
         case '\\': string.push_back('\\'); break;
         case '%':  string.push_back('%'); break;
@@ -1093,32 +1062,6 @@ static void readString(Parser* parser)
       string.push_back(c);
     }
   }
-#else
-        case '"':  string.push_back('"'); break;
-        case '\\': string.push_back('\\'); break;
-        case '%':  string.push_back('%'); break;
-        case '0':  string.push_back('\0'); break;
-        case 'a':  string.push_back('\a'); break;
-        case 'b':  string.push_back('\b'); break;
-        case 'e':  string.push_back('\33'); break;
-        case 'f':  string.push_back('\f'); break;
-        case 'n':  string.push_back('\n'); break;
-        case 'r':  string.push_back('\r'); break;
-        case 't':  string.push_back('\t'); break;
-        case 'u':  readUnicodeEscape(parser, &string, 4); break;
-        case 'U':  readUnicodeEscape(parser, &string, 8); break;
-        case 'v':  string.push_back('\v'); break;
-        case 'x':
-          string.push_back((uint8_t)readHexEscape(parser, 2, "byte"));
-          break;
-      }
-    }
-    else
-    {
-      string.push_back(c);
-    }
-  }
-#endif
 
   parser->next.value = wrenNewStringLength(parser->vm,
                                            string.data(), string.size());
