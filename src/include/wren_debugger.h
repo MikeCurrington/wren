@@ -114,7 +114,7 @@ namespace debug
       virtual void setStopOnEntry(bool stopOnEntry) = 0;
 
       // Sends [text] to the client's debug console as a stdout "output"
-      // event. Hosts call this from their writeFn so System.print() shows up
+      // event. Hosts call this from their VM's write() override so System.print() shows up
       // in VS Code.
       virtual void writeOutput(const std::string& text) = 0;
 

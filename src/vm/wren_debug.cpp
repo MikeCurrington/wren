@@ -65,21 +65,16 @@ void wrenDebugClearClassFields(WrenVM* vm)
 
 void wrenDebugPrintStackTrace(WrenVM* vm)
 {
-  // Bail if the host doesn't enable printing errors.
-  if (vm->config.errorFn == nullptr) return;
-  
   ObjFiber* fiber = vm->fiber;
   if (IS_STRING(fiber->error))
   {
-    vm->config.errorFn(vm, WREN_ERROR_RUNTIME,
-                       nullptr, -1, AS_CSTRING(fiber->error));
+    vm->error(WREN_ERROR_RUNTIME, nullptr, -1, AS_CSTRING(fiber->error));
   }
   else
   {
     // TODO: Print something a little useful here. Maybe the name of the error's
     // class?
-    vm->config.errorFn(vm, WREN_ERROR_RUNTIME,
-                       nullptr, -1, "[error object]");
+    vm->error(WREN_ERROR_RUNTIME, nullptr, -1, "[error object]");
   }
 
   for (int i = fiber->numFrames - 1; i >= 0; i--)
@@ -89,17 +84,16 @@ void wrenDebugPrintStackTrace(WrenVM* vm)
 
     // Skip over stub functions for calling methods from the C API.
     if (fn->module == nullptr) continue;
-    
+
     // The built-in core module has no name. We explicitly omit it from stack
     // traces since we don't want to highlight to a user the implementation
     // detail of what part of the core module is written in C and what is Wren.
     if (fn->module->name == nullptr) continue;
-    
+
     // -1 because IP has advanced past the instruction that it just executed.
     int line = fn->debug->sourceLines.data[frame->ip - fn->code.data - 1];
-    vm->config.errorFn(vm, WREN_ERROR_STACK_TRACE,
-                       fn->module->name->value, line,
-                       fn->debug->name);
+    vm->error(WREN_ERROR_STACK_TRACE, fn->module->name->value, line,
+              fn->debug->name);
   }
 }
 
@@ -481,7 +475,7 @@ void wrenVmDebugHook(WrenVM* vm, ObjFiber* fiber, CallFrame* frame)
   vm->apiStack = fiber->stackTop;
   vm->debugSavedStackTop = fiber->stackTop;
 
-  vm->debugHook(vm, WREN_DEBUG_LINE, vm->debugHookData);
+  vm->onDebugEvent(WREN_DEBUG_LINE);
 
   vm->debugSavedStackTop = nullptr;
   vm->apiStack = nullptr;

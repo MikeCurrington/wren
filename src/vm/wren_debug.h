@@ -21,7 +21,7 @@ void wrenDebugRecordClassFields(WrenVM* vm, const char* className,
 // NULL if the name is unknown (e.g. a class the VM did not compile).
 const char* wrenDebugGetFieldName(WrenVM* vm, ObjClass* classObj, int index);
 
-// Frees the class field name registry for [vm]. Called from wrenFreeVM().
+// Frees the class field name registry for [vm]. Called from ~WrenVM().
 void wrenDebugClearClassFields(WrenVM* vm);
 
 // Invokes the VM's debug hook (if installed) for the source line [frame] is

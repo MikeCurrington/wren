@@ -4,7 +4,9 @@
 
 #include <stdio.h>
 #include <string.h>
+
 #include "wren.h"
+#include "wren_vm.h"
 
 // Exit codes used by the wren binaries, following the BSD standard
 //
@@ -76,14 +78,38 @@ typedef struct
   PathType pathType(const char* path);
 //file helpers
   char* readFile(const char* path);
-  WrenLoadModuleResult readModule(WrenVM* vm, const char* module);
-//vm helpers
-  void vm_write(WrenVM* vm, const char* text);
-  void reportError(WrenVM* vm, WrenErrorType type, const char* module, int line, const char* message);
-  const char* resolveModule(WrenVM* vm, const char* importer, const char* module);
 //main helpers
   bool isModuleAnAPITest(const char* module);
   WrenInterpretResult runFile(WrenVM* vm, const char* path);
   int handle_args(int argc, const char* argv[]);
+
+// Foreign bindings for the API tests (defined in api/api_tests.cpp).
+WrenForeignMethodFn APITest_bindForeignMethod(
+    WrenVM* vm, const char* module, const char* className,
+    bool isStatic, const char* signature);
+WrenForeignClassMethods APITest_bindForeignClass(
+    WrenVM* vm, const char* module, const char* className);
+
+// The test runner's VM: prints output to stdout, reports errors to stderr,
+// loads module sources from .wren files next to their module paths, and — for
+// API tests — binds the API test foreign classes and methods. Module name
+// resolution uses the VM's built-in relative-import policy.
+struct TestVM : WrenVM
+{
+  explicit TestVM(bool isAPITest);
+
+  void write(const char* text) override;
+  void error(WrenErrorType type, const char* module, int line,
+             const char* message) override;
+  std::string loadModule(std::string_view module) override;
+  WrenForeignMethodFn bindForeignMethod(const char* module,
+      const char* className, bool isStatic, const char* signature) override;
+  WrenForeignClassMethods bindForeignClass(const char* module,
+                                           const char* className) override;
+
+private:
+  static WrenVM::Config makeConfig();
+  bool isAPITest_ = false;
+};
 
 #endif //WREN_TEST_H

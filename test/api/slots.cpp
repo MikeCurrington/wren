@@ -2,6 +2,7 @@
 #include <string.h>
 
 #include "slots.h"
+#include "wren_vm.h"
 
 static void noSet(WrenVM* vm)
 {
@@ -121,30 +122,26 @@ static void ensureOutsideForeign(WrenVM* vm)
 {
   // To test the behavior outside of a foreign method (which we're currently
   // in), create a new separate VM.
-  WrenConfiguration config;
-  wrenInitConfiguration(&config);
-  WrenVM* otherVM = wrenNewVM(&config);
+  WrenVM otherVM;
 
-  int before = wrenGetSlotCount(otherVM);
+  int before = wrenGetSlotCount(&otherVM);
 
-  wrenEnsureSlots(otherVM, 20);
+  wrenEnsureSlots(&otherVM, 20);
 
-  int after = wrenGetSlotCount(otherVM);
+  int after = wrenGetSlotCount(&otherVM);
 
   // Use the slots to make sure they're available.
   for (int i = 0; i < 20; i++)
   {
-    wrenSetSlotDouble(otherVM, i, i);
+    wrenSetSlotDouble(&otherVM, i, i);
   }
 
   int sum = 0;
 
   for (int i = 0; i < 20; i++)
   {
-    sum += (int)wrenGetSlotDouble(otherVM, i);
+    sum += (int)wrenGetSlotDouble(&otherVM, i);
   }
-
-  wrenFreeVM(otherVM);
 
   char result[100];
   snprintf(result, sizeof(result), "%d -> %d (%d)", before, after, sum);

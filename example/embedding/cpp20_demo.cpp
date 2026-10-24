@@ -34,13 +34,18 @@ public:
   static Vec3 zero() { return Vec3(0, 0, 0); }
 };
 
-int main() {
-  wren::VM::Config config;
-  config.wrenConfig.writeFn = [](WrenVM*, const char* text) { printf("%s", text); };
-  config.wrenConfig.errorFn = [](WrenVM*, WrenErrorType, const char* mod, int line, const char* msg) {
+// The demo's VM: prints to stdout, reports errors to stderr.
+struct DemoVM : wren::VM {
+  using wren::VM::VM;
+
+  void write(const char* text) override { printf("%s", text); }
+  void error(WrenErrorType, const char* mod, int line, const char* msg) override {
     fprintf(stderr, "[%s:%d] %s\n", mod ? mod : "?", line, msg);
-  };
-  wren::VM vm(std::move(config));
+  }
+};
+
+int main() {
+  DemoVM vm;
 
   // Register a module with a foreign class
   {

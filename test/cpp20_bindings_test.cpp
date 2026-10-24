@@ -160,18 +160,21 @@ public:
 
 std::shared_ptr<Widget> Widget::root;
 
+// The test's VM: prints to stdout, reports errors to stderr.
+struct PrintVM : wren::VM {
+  using wren::VM::VM;
+
+  void write(const char* text) override { printf("%s", text); }
+  void error(WrenErrorType, const char* mod, int line, const char* msg) override {
+    fprintf(stderr, "[%s:%d] %s\n", mod ? mod : "?", line, msg);
+  }
+};
+
 int main() {
   printf("Testing C++20 Foreign Bindings API\n");
   printf("=====================================\n\n");
-  
-  // Configure VM with write function
-  wren::VM::Config config;
-  config.wrenConfig.writeFn = [](WrenVM*, const char* text) { printf("%s", text); };
-  config.wrenConfig.errorFn = [](WrenVM*, WrenErrorType, const char* mod, int line, const char* msg) {
-    fprintf(stderr, "[%s:%d] %s\n", mod ? mod : "?", line, msg);
-  };
-  
-  wren::VM vm(std::move(config));
+
+  PrintVM vm;
   
   // Test 1: Basic foreign class with default constructor
   {

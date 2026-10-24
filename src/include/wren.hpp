@@ -41,9 +41,14 @@ extern "C" {
 }
 #include "wren_debugger.h"
 
+// The single VM class: WrenVM itself, which now carries the C++ host API and
+// the virtual host callbacks. wren::VM is an alias so existing code keeps
+// compiling.
+#include "../vm/wren_vm.h"
+
 namespace wren {
 
-class VM;
+using VM = ::WrenVM;
 template <typename T> class Foreign;
 class Module;
 class Handle;
@@ -436,8 +441,9 @@ void ctorDispatcher(WrenVM* vm) {
 // Signature generation helpers
 // ===========================================================================
 inline std::string makeMethodSig(std::string_view name, std::size_t numArgs, bool isStatic) {
-  // NOTE: Wren's bindForeignMethodFn callback signature does NOT include "static ".
-  // The isStatic parameter tells us, and the signature is just the method name + args.
+  // NOTE: The VM's bindForeignMethod() override receives the method signature
+  // WITHOUT a "static " prefix. The isStatic parameter tells us, and the
+  // signature is just the method name + args.
   std::string sig = std::string(name);
   if (numArgs == 0) return sig;
   sig += "(";
@@ -729,7 +735,7 @@ public:
 private:
   VM* vm_;
   ModuleReg reg_;
-  friend class VM;
+  friend struct ::WrenVM;
   template <typename> friend class Foreign;
 };
 
@@ -745,232 +751,47 @@ Foreign<T>::~Foreign() {
   module_->addClass(std::move(reg_));
 }
 
-// ===========================================================================
-// VM — the main C++ entry point
-// ===========================================================================
-class VM {
-public:
-  struct Config {
-    WrenConfiguration wrenConfig;
-
-    // The port the debugger listens on (127.0.0.1) (if enabled)
-    int debugPort = 4711;
-
-    Config() { wrenInitConfiguration(&wrenConfig); }
-  };
-
-  VM() : VM(Config{}) {}
-  VM(Config config) : config_(std::move(config)) {
-    config_.wrenConfig.userData = this;
-    config_.wrenConfig.bindForeignMethodFn = &VM::bindMethodCb;
-    config_.wrenConfig.bindForeignClassFn = &VM::bindClassCb;
-#if 0//def WREN_ENABLE_DEBUGGER
-    if (config_.debug) {
-      // Mirror output to the client's debug console. The user's callbacks
-      // are kept and invoked by the trampolines below.
-      userWriteFn_ = config_.wrenConfig.writeFn;
-      userErrorFn_ = config_.wrenConfig.errorFn;
-      config_.wrenConfig.writeFn = &VM::debugWriteCb;
-      config_.wrenConfig.errorFn = &VM::debugErrorCb;
-    }
-#endif
-    // Auto-serve source for modules registered via .module()
-    if (!config_.wrenConfig.loadModuleFn) {
-      config_.wrenConfig.loadModuleFn = &VM::loadModuleCb;
-    }
-    vm_ = wrenNewVM(&config_.wrenConfig);
-  }
-  ~VM() {
-    // The debugger keeps WrenHandles alive and installs a debug hook, so it
-    // must detach while the VM is still valid. Members die after this body,
-    // so reset it here rather than relying on destruction order.
-    debugger_.reset();
-    if (vm_) wrenFreeVM(vm_);
-  }
-  VM(const VM&) = delete;
-  VM& operator=(const VM&) = delete;
-  VM(VM&&) = delete;
-  VM& operator=(VM&&) = delete;
-
-  WrenVM* raw() const { return vm_; }
-
-  // The VM's debugger, or nullptr
-  wren::debug::Debugger* debugger() { return debugger_.get(); }
-
-  void setDebugger(std::unique_ptr<debug::Debugger> debugger)
-  {
-    debugger_ = std::move(debugger);
-  }
-
-  // Tells the debugger that Wren module [module] was loaded from [path], so
-  // VS Code can map source files to module names for breakpoints. No-op
-  // unless Config::debug was set and the debugger attached. wren.hpp itself
-  // has no filesystem notion, so file-loading hosts call this per module.
-  void registerModulePath(std::string_view module, std::string_view path) {
-    if (debugger_) {
-      debugger_->registerModulePath(std::string(module), std::string(path));
-    }
-  }
-
-  Module& module(std::string name) {
-    auto& m = modules_[name];
-    if (!m) m = std::make_unique<Module>(this, name);
-    return *m;
-  }
-
-  WrenInterpretResult interpret(std::string_view mod, std::string_view src) {
-    return wrenInterpret(vm_, std::string(mod).c_str(), std::string(src).c_str());
-  }
-
-  Handle callHandle(std::string_view sig) {
-    return Handle(vm_, wrenMakeCallHandle(vm_, std::string(sig).c_str()));
-  }
-
-  void getVariable(std::string_view mod, std::string_view name, int slot) {
-    wrenEnsureSlots(vm_, slot + 1);
-    wrenGetVariable(vm_, std::string(mod).c_str(), std::string(name).c_str(), slot);
-  }
-
-  void collectGarbage() { wrenCollectGarbage(vm_); }
-  void* userData() const { return wrenGetUserData(vm_); }
-  void setUserData(void* data) { wrenSetUserData(vm_, data); }
-
-  // Get a foreign object from a slot as a typed reference.
-  template <typename T> T get(int slot) {
-    using D = std::decay_t<T>;
-    if constexpr (detail::isWrenBuiltin_v<D>) return detail::Converter<D>::get(vm_, slot);
-    else return detail::getForeign<D>(vm_, slot);
-  }
-
-  // Get a shared_ptr to a foreign object — enables C++ to keep the object alive.
-  template <typename T>
-  std::shared_ptr<T> getShared(int slot) {
-    return detail::getForeignShared<T>(vm_, slot);
-  }
-
-  // Set a slot to a foreign object (copies/moves the value into a new wrapper).
-  template <typename T> void set(int slot, T&& value) {
-    using D = std::decay_t<T>;
-    if constexpr (detail::isWrenBuiltin_v<D>) detail::Converter<D>::set(vm_, slot, std::forward<T>(value));
-    else {
-      void* data = wrenSetSlotNewForeign(vm_, slot, slot, sizeof(detail::ForeignWrapper));
-      new (data) detail::ForeignWrapper(detail::ForeignWrapper::make<D>(std::forward<T>(value)));
-    }
-  }
-
-  // Set a slot from an existing shared_ptr — shares ownership, no copy.
-  template <typename T>
-  void setShared(int slot, std::shared_ptr<T> ptr) {
-    void* data = wrenSetSlotNewForeign(vm_, slot, slot, sizeof(detail::ForeignWrapper));
-    new (data) detail::ForeignWrapper(detail::ForeignWrapper::share<T>(std::move(ptr)));
-  }
-
-  void setNull(int slot) { wrenSetSlotNull(vm_, slot); }
-  int slotCount() const { return wrenGetSlotCount(vm_); }
-  void ensureSlots(int n) { wrenEnsureSlots(vm_, n); }
-  WrenType slotType(int s) const { return wrenGetSlotType(vm_, s); }
-
-private:
-#ifdef WREN_ENABLE_DEBUGGER
-  // Invoke the user's write/error callbacks, then mirror the text to the
-  // debug client's console.
-  static void debugWriteCb(WrenVM* vm, const char* text) {
-    auto* self = static_cast<VM*>(wrenGetUserData(vm));
-    if (self->userWriteFn_) self->userWriteFn_(vm, text);
-    if (self->debugger_) self->debugger_->writeOutput(text);
-  }
-
-  static void debugErrorCb(WrenVM* vm, WrenErrorType type, const char* mod,
-                           int line, const char* message) {
-    auto* self = static_cast<VM*>(wrenGetUserData(vm));
-    if (self->userErrorFn_) self->userErrorFn_(vm, type, mod, line, message);
-    if (!self->debugger_) return;
-    std::string text;
-    if (type == WREN_ERROR_COMPILE) {
-      text = "[" + std::string(mod ? mod : "?") + " line " +
-             std::to_string(line) + "] " + message + "\n";
-    } else if (type == WREN_ERROR_RUNTIME) {
-      text = std::string(message) + "\n";
-    } else {
-      text = "[" + std::string(mod ? mod : "?") + " line " +
-             std::to_string(line) + "] in " + message + "\n";
-    }
-    self->debugger_->writeOutput(text);
-  }
-#endif
-
-  static WrenForeignMethodFn bindMethodCb(WrenVM* vm, const char* mod,
-                                          const char* cls, bool isStatic,
-                                          const char* sig) {
-    auto* self = static_cast<VM*>(wrenGetUserData(vm));
-    auto it = self->modules_.find(mod);
-    if (it == self->modules_.end()) return nullptr;
-    for (const auto& c : it->second->registration().classes) {
-      if (c.className != cls) continue;
-      // Exact match first
-      for (const auto& m : c.methods) {
-        if (m.isStatic == isStatic && m.signature == sig) return m.fn;
-      }
-      // Fallback: Wren distinguishes getter "foo" from call "foo()" for 0-arg methods.
-      // Allow either form to match a 0-arg method registration.
-      std::string reqSig(sig);
-      std::string altSig;
-      if (reqSig.size() > 2 && reqSig.compare(reqSig.size() - 2, 2, "()") == 0) {
-        altSig = reqSig.substr(0, reqSig.size() - 2); // "foo()" -> "foo"
-      } else if (reqSig.find('(') == std::string::npos) {
-        altSig = reqSig + "()"; // "foo" -> "foo()"
-      }
-      if (!altSig.empty()) {
-        for (const auto& m : c.methods) {
-          if (m.isStatic == isStatic && m.signature == altSig) return m.fn;
-        }
-      }
-    }
-    return nullptr;
-  }
-
-  static WrenLoadModuleResult loadModuleCb(WrenVM* vm, const char* mod) {
-    auto* self = static_cast<VM*>(wrenGetUserData(vm));
-    WrenLoadModuleResult result{};
-    auto it = self->modules_.find(mod);
-    if (it != self->modules_.end()) {
-      // The module has registered foreign classes — serve its generated source.
-      // We need to keep the string alive; store it in a static to survive the callback.
-      // (The VM copies the source during compilation, so it's safe after that.)
-      static thread_local std::string src;
-      src = it->second->generateSource();
-      if (!src.empty()) {
-        result.source = src.c_str();
-      }
-    }
-    return result;
-  }
-
-  static WrenForeignClassMethods bindClassCb(WrenVM* vm, const char* mod, const char* cls) {
-    auto* self = static_cast<VM*>(wrenGetUserData(vm));
-    WrenForeignClassMethods m{nullptr, nullptr};
-    auto it = self->modules_.find(mod);
-    if (it == self->modules_.end()) return m;
-    for (const auto& c : it->second->registration().classes) {
-      if (c.className != cls) continue;
-      m.allocate = c.allocator;
-      m.finalize = c.finalizer;
-      break;
-    }
-    return m;
-  }
-
-  Config config_;
-  WrenVM* vm_ = nullptr;
-  std::unordered_map<std::string, std::unique_ptr<Module>> modules_;
-
-  std::unique_ptr<debug::Debugger> debugger_;
-#ifdef WREN_ENABLE_DEBUGGER
-  WrenWriteFn userWriteFn_ = nullptr;
-  WrenErrorFn userErrorFn_ = nullptr;
-#endif
-};
-
 } // namespace wren
+
+// ===========================================================================
+// WrenVM member definitions that need the converters, Handle and Module
+// (declared in wren_vm.h). Defined at global scope because WrenVM lives
+// there.
+// ===========================================================================
+inline wren::Module& WrenVM::module(std::string name) {
+  auto& m = modules_[name];
+  if (!m) m = std::make_unique<wren::Module>(this, std::move(name));
+  return *m;
+}
+
+inline wren::Handle WrenVM::callHandle(std::string_view sig) {
+  return wren::Handle(this, wrenMakeCallHandle(this, std::string(sig).c_str()));
+}
+
+template <typename T> inline T WrenVM::get(int slot) {
+  using D = std::decay_t<T>;
+  if constexpr (wren::detail::isWrenBuiltin_v<D>) return wren::detail::Converter<D>::get(this, slot);
+  else return wren::detail::getForeign<D>(this, slot);
+}
+
+template <typename T>
+inline std::shared_ptr<T> WrenVM::getShared(int slot) {
+  return wren::detail::getForeignShared<T>(this, slot);
+}
+
+template <typename T> inline void WrenVM::set(int slot, T&& value) {
+  using D = std::decay_t<T>;
+  if constexpr (wren::detail::isWrenBuiltin_v<D>) wren::detail::Converter<D>::set(this, slot, std::forward<T>(value));
+  else {
+    void* data = wrenSetSlotNewForeign(this, slot, slot, sizeof(wren::detail::ForeignWrapper));
+    new (data) wren::detail::ForeignWrapper(wren::detail::ForeignWrapper::make<D>(std::forward<T>(value)));
+  }
+}
+
+template <typename T>
+inline void WrenVM::setShared(int slot, std::shared_ptr<T> ptr) {
+  void* data = wrenSetSlotNewForeign(this, slot, slot, sizeof(wren::detail::ForeignWrapper));
+  new (data) wren::detail::ForeignWrapper(wren::detail::ForeignWrapper::share<T>(std::move(ptr)));
+}
 
 #endif // wren_hpp

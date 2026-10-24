@@ -2,57 +2,73 @@
 #include <string.h>
 
 #include "resolution.h"
+#include "wren_vm.h"
 
-static void writeFn(WrenVM* vm, const char* text)
+// A test VM that prints to stdout and serves canned module sources.
+struct ResolutionVM : WrenVM
 {
-  printf("%s", text);
-}
+  using WrenVM::WrenVM;
 
-static void reportError(WrenVM* vm, WrenErrorType type,
-                        const char* module, int line, const char* message)
-{
-  if (type == WREN_ERROR_RUNTIME) printf("%s\n", message);
-}
-
-static void loadModuleComplete(WrenVM* vm, const char* module, WrenLoadModuleResult result)
-{
-  free((void*)result.source);
-}
-
-static WrenLoadModuleResult loadModule(WrenVM* vm, const char* module)
-{
-  printf("loading %s\n", module);
-
-  const char* source;
-  if (strcmp(module, "main/baz/bang") == 0)
+  void write(const char* text) override
   {
-    source = "import \"foo|bar\"";
+    printf("%s", text);
   }
-  else
+
+  void error(WrenErrorType type, const char* module, int line,
+             const char* message) override
   {
-    source = "System.print(\"ok\")";
+    if (type == WREN_ERROR_RUNTIME) printf("%s\n", message);
   }
-   
-  char* string = (char*)malloc(strlen(source) + 1);
-  strcpy(string, source);
 
-  WrenLoadModuleResult result = {0};
-    result.onComplete = loadModuleComplete;
-    result.source = string;
-  return result;
-}
+  std::string loadModule(std::string_view module) override
+  {
+    printf("loading %s\n", std::string(module).c_str());
 
-static void runTestVM(WrenVM* vm, WrenConfiguration* configuration,
-                      const char* source)
+    if (module == "main/baz/bang")
+    {
+      return "import \"foo|bar\"";
+    }
+    return "System.print(\"ok\")";
+  }
+};
+
+// Reports every import as a resolution error.
+struct ReturnsNullVM : ResolutionVM
 {
-  configuration->writeFn = writeFn;
-  configuration->errorFn = reportError;
-  configuration->loadModuleFn = loadModule;
+  using ResolutionVM::ResolutionVM;
 
-  WrenVM* otherVM = wrenNewVM(configuration);
+  std::optional<std::string> resolveModule(std::string_view importer,
+                                           std::string_view name) override
+  {
+    return std::nullopt;
+  }
+};
+
+// Concatenates the importer and the import name, replacing "|" with "/" so
+// the tests can use characters that are illegal in real paths.
+struct ChangeVM : ResolutionVM
+{
+  using ResolutionVM::ResolutionVM;
+
+  std::optional<std::string> resolveModule(std::string_view importer,
+                                           std::string_view name) override
+  {
+    std::string result = std::string(importer) + "/" + std::string(name);
+    for (char& c : result)
+    {
+      if (c == '|') c = '/';
+    }
+    return result;
+  }
+};
+
+template <typename TestVM>
+static void runTestVM(WrenVM* vm, const char* source)
+{
+  TestVM otherVM;
 
   // We should be able to execute code.
-  WrenInterpretResult result = wrenInterpret(otherVM, "main", source);
+  WrenInterpretResult result = wrenInterpret(&otherVM, "main", source);
   if (result != WREN_RESULT_SUCCESS)
   {
     wrenSetSlotString(vm, 0, "error");
@@ -61,84 +77,33 @@ static void runTestVM(WrenVM* vm, WrenConfiguration* configuration,
   {
     wrenSetSlotString(vm, 0, "success");
   }
-
-  wrenFreeVM(otherVM);
 }
 
 static void noResolver(WrenVM* vm)
 {
-  WrenConfiguration configuration;
-  wrenInitConfiguration(&configuration);
-
-  // Should default to no resolution function.
-  if (configuration.resolveModuleFn != NULL)
-  {
-    wrenSetSlotString(vm, 0, "Did not have null resolve function.");
-    return;
-  }
-
-  runTestVM(vm, &configuration, "import \"foo/bar\"");
-}
-
-static const char* resolveToNull(WrenVM* vm, const char* importer,
-                                 const char* name)
-{
-  return NULL;
+  // With no resolver override, the VM's default resolver passes logical
+  // import strings along unchanged.
+  runTestVM<ResolutionVM>(vm, "import \"foo/bar\"");
 }
 
 static void returnsNull(WrenVM* vm)
 {
-  WrenConfiguration configuration;
-  wrenInitConfiguration(&configuration);
-
-  configuration.resolveModuleFn = resolveToNull;
-  runTestVM(vm, &configuration, "import \"foo/bar\"");
-}
-
-static const char* resolveChange(WrenVM* vm, const char* importer,
-                                 const char* name)
-{
-  // Concatenate importer and name.
-  size_t length = strlen(importer) + 1 + strlen(name) + 1;
-  char* result = (char*)malloc(length);
-  strcpy(result, importer);
-  strcat(result, "/");
-  strcat(result, name);
-
-  // Replace "|" with "/".
-  for (size_t i = 0; i < length; i++)
-  {
-    if (result[i] == '|') result[i] = '/';
-  }
-
-  return result;
+  runTestVM<ReturnsNullVM>(vm, "import \"foo/bar\"");
 }
 
 static void changesString(WrenVM* vm)
 {
-  WrenConfiguration configuration;
-  wrenInitConfiguration(&configuration);
-
-  configuration.resolveModuleFn = resolveChange;
-  runTestVM(vm, &configuration, "import \"foo|bar\"");
+  runTestVM<ChangeVM>(vm, "import \"foo|bar\"");
 }
 
 static void shared(WrenVM* vm)
 {
-  WrenConfiguration configuration;
-  wrenInitConfiguration(&configuration);
-
-  configuration.resolveModuleFn = resolveChange;
-  runTestVM(vm, &configuration, "import \"foo|bar\"\nimport \"foo/bar\"");
+  runTestVM<ChangeVM>(vm, "import \"foo|bar\"\nimport \"foo/bar\"");
 }
 
 static void importer(WrenVM* vm)
 {
-  WrenConfiguration configuration;
-  wrenInitConfiguration(&configuration);
-
-  configuration.resolveModuleFn = resolveChange;
-  runTestVM(vm, &configuration, "import \"baz|bang\"");
+  runTestVM<ChangeVM>(vm, "import \"baz|bang\"");
 }
 
 WrenForeignMethodFn resolutionBindMethod(const char* signature)

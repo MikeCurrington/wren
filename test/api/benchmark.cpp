@@ -2,6 +2,7 @@
 #include <time.h>
 
 #include "benchmark.h"
+#include "wren_vm.h"
 
 static void arguments(WrenVM* vm)
 {
@@ -26,40 +27,37 @@ static void call(WrenVM* vm)
 
   // Since the VM is not re-entrant, we can't call from within this foreign
   // method. Instead, make a new VM to run the call test in.
-  WrenConfiguration config;
-  wrenInitConfiguration(&config);
-  WrenVM* otherVM = wrenNewVM(&config);
+  WrenVM otherVM;
 
-  wrenInterpret(otherVM, "main", testScript);
+  wrenInterpret(&otherVM, "main", testScript);
 
-  WrenHandle* method = wrenMakeCallHandle(otherVM, "method(_,_,_,_)");
+  WrenHandle* method = wrenMakeCallHandle(&otherVM, "method(_,_,_,_)");
 
-  wrenEnsureSlots(otherVM, 1);
-  wrenGetVariable(otherVM, "main", "Test", 0);
-  WrenHandle* testClass = wrenGetSlotHandle(otherVM, 0);
+  wrenEnsureSlots(&otherVM, 1);
+  wrenGetVariable(&otherVM, "main", "Test", 0);
+  WrenHandle* testClass = wrenGetSlotHandle(&otherVM, 0);
 
   double startTime = (double)clock() / CLOCKS_PER_SEC;
 
   double result = 0;
   for (int i = 0; i < iterations; i++)
   {
-    wrenEnsureSlots(otherVM, 5);
-    wrenSetSlotHandle(otherVM, 0, testClass);
-    wrenSetSlotDouble(otherVM, 1, 1.0);
-    wrenSetSlotDouble(otherVM, 2, 2.0);
-    wrenSetSlotDouble(otherVM, 3, 3.0);
-    wrenSetSlotDouble(otherVM, 4, 4.0);
+    wrenEnsureSlots(&otherVM, 5);
+    wrenSetSlotHandle(&otherVM, 0, testClass);
+    wrenSetSlotDouble(&otherVM, 1, 1.0);
+    wrenSetSlotDouble(&otherVM, 2, 2.0);
+    wrenSetSlotDouble(&otherVM, 3, 3.0);
+    wrenSetSlotDouble(&otherVM, 4, 4.0);
 
-    wrenCall(otherVM, method);
+    wrenCall(&otherVM, method);
 
-    result += wrenGetSlotDouble(otherVM, 0);
+    result += wrenGetSlotDouble(&otherVM, 0);
   }
 
   double elapsed = (double)clock() / CLOCKS_PER_SEC - startTime;
 
-  wrenReleaseHandle(otherVM, testClass);
-  wrenReleaseHandle(otherVM, method);
-  wrenFreeVM(otherVM);
+  wrenReleaseHandle(&otherVM, testClass);
+  wrenReleaseHandle(&otherVM, method);
 
   if (result == (1.0 + 2.0 + 3.0 + 4.0) * iterations)
   {

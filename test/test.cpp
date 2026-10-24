@@ -340,12 +340,24 @@
 
 //VM bindings
 
-  void vm_write(WrenVM* vm, const char* text)
+  TestVM::TestVM(bool isAPITest) : WrenVM(makeConfig()), isAPITest_(isAPITest)
+  {
+  }
+
+  WrenVM::Config TestVM::makeConfig()
+  {
+    WrenVM::Config config;
+    // Since we're running in a standalone process, be generous with memory.
+    config.wrenConfig.initialHeapSize = 1024 * 1024 * 100;
+    return config;
+  }
+
+  void TestVM::write(const char* text)
   {
     printf("%s", text);
   }
 
-  void reportError(WrenVM* vm, WrenErrorType type, 
+  void TestVM::error(WrenErrorType type,
     const char* module, int line, const char* message)
   {
     switch (type)
@@ -364,61 +376,39 @@
     }
   }
 
-  void readModuleComplete(WrenVM* vm, const char* module, WrenLoadModuleResult result)
+  std::string TestVM::loadModule(std::string_view module)
   {
-    if (result.source) {
-      free((void*)result.source);
-      result.source = NULL;
-    }
-  }
-
-  WrenLoadModuleResult readModule(WrenVM* vm, const char* module) 
-  {
-    //source may or may not be null
-    WrenLoadModuleResult result = {0};
-
     #ifdef WREN_TRY
-      return result;
+      return std::string();
     #endif
 
-    Path* filePath = pathNew(module);
+    std::string filePath(module);
+    filePath += ".wren";
 
-    // Add a ".wren" file extension.
-    pathAppendString(filePath, ".wren");
+    char* source = readFile(filePath.c_str());
 
-    char* source = readFile(filePath->chars);
-    pathFree(filePath);
-
-      result.source = source;
-      result.onComplete = readModuleComplete;
+    std::string result;
+    if (source != NULL)
+    {
+      result = source;
+      free(source);
+    }
     return result;
-
   }
 
-  // Applies the CLI's import resolution policy. The rules are:
-  //
-  // * If [module] starts with "./" or "../", it is a relative import, relative
-  //   to [importer]. The resolved path is [name] concatenated onto the directory
-  //   containing [importer] and then normalized.
-  //
-  //   For example, importing "./a/./b/../c" from "./d/e/f" gives you "./d/e/a/c".
-  const char* resolveModule(WrenVM* vm, const char* importer, const char* module)
+  WrenForeignMethodFn TestVM::bindForeignMethod(const char* module,
+      const char* className, bool isStatic, const char* signature)
   {
-    // Logical import strings are used as-is and need no resolution.
-    if (pathType(module) == PATH_TYPE_SIMPLE) return module;
+    if (!isAPITest_) return nullptr;
+    return APITest_bindForeignMethod(this, module, className, isStatic, signature);
+  }
 
-    // Get the directory containing the importing module.
-    Path* path = pathNew(importer);
-    pathDirName(path);
-
-    // Add the relative import path.
-    pathJoin(path, module);
-
-    pathNormalize(path);
-    char* resolved = pathToString(path);
-
-    pathFree(path);
-    return resolved;
+  WrenForeignClassMethods TestVM::bindForeignClass(const char* module,
+                                                   const char* className)
+  {
+    WrenForeignClassMethods methods{nullptr, nullptr};
+    if (!isAPITest_) return methods;
+    return APITest_bindForeignClass(this, module, className);
   }
 
 //main helpers

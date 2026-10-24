@@ -1,5 +1,6 @@
 #include <stdarg.h>
 #include <string.h>
+#include <vector>
 
 #include "wren.h"
 #include "wren_common.h"
@@ -8,6 +9,11 @@
 #include "wren_debug.h"
 #include "wren_primitive.h"
 #include "wren_vm.h"
+
+// For the complete wren::Module (the modules_ registry is destroyed here and
+// the default bindForeignMethod()/bindForeignClass()/loadModule()
+// implementations look up registrations in it).
+#include "../include/wren.hpp"
 
 #if WREN_OPT_META
   #include "wren_opt_meta.h"
@@ -44,49 +50,27 @@ int wrenGetVersionNumber()
 void wrenInitConfiguration(WrenConfiguration* config)
 {
   config->reallocateFn = defaultReallocate;
-  config->resolveModuleFn = nullptr;
-  config->loadModuleFn = nullptr;
-  config->bindForeignMethodFn = nullptr;
-  config->bindForeignClassFn = nullptr;
-  config->writeFn = nullptr;
-  config->errorFn = nullptr;
   config->initialHeapSize = 1024 * 1024 * 10;
   config->minHeapSize = 1024 * 1024;
   config->heapGrowthPercent = 50;
   config->userData = nullptr;
 }
 
-WrenVM::WrenVM(const WrenConfiguration* config) noexcept
+WrenVM::WrenVM(Config config)
 {
-  WrenReallocateFn reallocate = defaultReallocate;
-  void* userData = nullptr;
-  if (config != nullptr) {
-    userData = config->userData;
-    reallocate = config->reallocateFn ? config->reallocateFn : defaultReallocate;
-  }
-  
-  //WrenVM* vm = (WrenVM*)reallocate(nullptr, sizeof(*vm), userData);
-  //memset(vm, 0, sizeof(WrenVM));
-
-  // Copy the configuration if given one.
-  if (config != nullptr)
-  {
-    memcpy(&this->config, config, sizeof(WrenConfiguration));
-
-    // We choose to set this after copying, 
-    // rather than modifying the user config pointer
-    this->config.reallocateFn = reallocate;
-  }
-  else
-  {
-    wrenInitConfiguration(&this->config);
-  }
+  // Copy the configuration, ensuring a real allocator.
+  WrenReallocateFn reallocate = config.wrenConfig.reallocateFn != nullptr
+      ? config.wrenConfig.reallocateFn : defaultReallocate;
+  memcpy(&this->config, &config.wrenConfig, sizeof(WrenConfiguration));
+  this->config.reallocateFn = reallocate;
+  this->debugPort = config.debugPort;
 
   // TODO: Should we allocate and free this during a GC?
   this->grayCount = 0;
   // TODO: Tune this.
   this->grayCapacity = 4;
-  this->gray = (Obj**)reallocate(nullptr, this->grayCapacity * sizeof(Obj*), userData);
+  this->gray = (Obj**)reallocate(nullptr, this->grayCapacity * sizeof(Obj*),
+                                 this->config.userData);
   this->nextGC = this->config.initialHeapSize;
 
   wrenSymbolTableInit(&this->methodNames);
@@ -95,35 +79,184 @@ WrenVM::WrenVM(const WrenConfiguration* config) noexcept
   wrenInitializeCore(this);
 }
 
-void wrenFreeVM(WrenVM* vm)
+WrenVM::~WrenVM()
 {
-  ASSERT(vm->methodNames.count > 0, "VM appears to have already been freed.");
-  
+  // The debugger keeps WrenHandles alive and installs a debug hook, so it
+  // must detach while the VM is still valid.
+  debugger_.reset();
+
+  ASSERT(methodNames.count > 0, "VM appears to have already been freed.");
+
   // Free all of the GC objects.
-  Obj* obj = vm->first;
+  Obj* obj = first;
   while (obj != nullptr)
   {
     Obj* next = obj->next;
-    wrenFreeObj(vm, obj);
+    wrenFreeObj(this, obj);
     obj = next;
   }
 
   // Free up the GC gray set.
-  vm->gray = (Obj**)vm->config.reallocateFn(vm->gray, 0, vm->config.userData);
+  gray = (Obj**)config.reallocateFn(gray, 0, config.userData);
 
   // Tell the user if they didn't free any handles. We don't want to just free
   // them here because the host app may still have pointers to them that they
   // may try to use. Better to tell them about the bug early.
-  ASSERT(vm->handles == nullptr, "All handles have not been released.");
+  ASSERT(handles == nullptr, "All handles have not been released.");
 
   // Likewise, all nested calls must have been ended before the VM is freed.
-  ASSERT(vm->callContexts == nullptr, "All nested calls have not been ended.");
+  ASSERT(callContexts == nullptr, "All nested calls have not been ended.");
 
-  wrenSymbolTableClear(vm, &vm->methodNames);
+  wrenSymbolTableClear(this, &methodNames);
 
-  wrenDebugClearClassFields(vm);
+  wrenDebugClearClassFields(this);
+}
 
-  DEALLOCATE(vm, vm);
+std::optional<std::string> WrenVM::resolveModule(std::string_view importer,
+                                                 std::string_view name)
+{
+  // Logical import strings are used as-is and need no resolution.
+  bool isPath = !name.empty() && (name.front() == '/' ||
+      name.substr(0, 2) == "./" || name.substr(0, 3) == "../");
+  if (!isPath) return std::string(name);
+
+  // Get the directory containing the importing module.
+  std::string path(importer);
+  size_t slash = path.find_last_of('/');
+  if (slash == std::string::npos) path.clear();
+  else path.resize(slash);
+
+  // Add the relative import path.
+  if (!path.empty() && path.back() != '/') path += '/';
+  path += name;
+
+  // Normalize: resolve "." and ".." components. A leading "/" is preserved,
+  // ".." components that walk out of the tree are kept (except for absolute
+  // paths), and a leading "./" is preserved so that path and logical imports
+  // remain distinguishable.
+  const bool isAbsolute = !path.empty() && path.front() == '/';
+  const bool leadingDotSlash = path.compare(0, 2, "./") == 0;
+  std::vector<std::string_view> components;
+  int leadingDoubles = 0;
+  size_t pos = 0;
+  while (pos <= path.size())
+  {
+    size_t next = path.find('/', pos);
+    if (next == std::string::npos) next = path.size();
+    std::string_view component =
+        std::string_view(path).substr(pos, next - pos);
+    if (component == ".")
+    {
+      // Skip "." components.
+    }
+    else if (component == "..")
+    {
+      // Walk out of directories on "..".
+      if (!components.empty()) components.pop_back();
+      else if (!isAbsolute) leadingDoubles++;
+    }
+    else if (!component.empty())
+    {
+      components.push_back(component);
+    }
+    pos = next + 1;
+  }
+
+  std::string result;
+  if (isAbsolute)
+  {
+    result = "/";
+    for (const auto& component : components)
+    {
+      if (result.back() != '/') result += '/';
+      result += component;
+    }
+  }
+  else
+  {
+    if (leadingDoubles > 0)
+    {
+      for (int i = 0; i < leadingDoubles; i++)
+      {
+        if (!result.empty()) result += '/';
+        result += "..";
+      }
+    }
+    else if (leadingDotSlash)
+    {
+      result = ".";
+    }
+    for (const auto& component : components)
+    {
+      if (!result.empty()) result += '/';
+      result += component;
+    }
+  }
+
+  if (result.empty()) result = ".";
+  return result;
+}
+
+std::string WrenVM::loadModule(std::string_view name)
+{
+  // Serve the source generated for modules registered from C++.
+  auto it = modules_.find(std::string(name));
+  if (it == modules_.end()) return std::string();
+  return it->second->generateSource();
+}
+
+WrenForeignMethodFn WrenVM::bindForeignMethod(const char* module,
+                                              const char* className,
+                                              bool isStatic,
+                                              const char* signature)
+{
+  auto it = modules_.find(module);
+  if (it == modules_.end()) return nullptr;
+  for (const auto& c : it->second->registration().classes)
+  {
+    if (c.className != className) continue;
+    // Exact match first.
+    for (const auto& m : c.methods)
+    {
+      if (m.isStatic == isStatic && m.signature == signature) return m.fn;
+    }
+    // Fallback: Wren distinguishes getter "foo" from call "foo()" for 0-arg
+    // methods. Allow either form to match a 0-arg method registration.
+    std::string reqSig(signature);
+    std::string altSig;
+    if (reqSig.size() > 2 && reqSig.compare(reqSig.size() - 2, 2, "()") == 0)
+    {
+      altSig = reqSig.substr(0, reqSig.size() - 2); // "foo()" -> "foo"
+    }
+    else if (reqSig.find('(') == std::string::npos)
+    {
+      altSig = reqSig + "()"; // "foo" -> "foo()"
+    }
+    if (!altSig.empty())
+    {
+      for (const auto& m : c.methods)
+      {
+        if (m.isStatic == isStatic && m.signature == altSig) return m.fn;
+      }
+    }
+  }
+  return nullptr;
+}
+
+WrenForeignClassMethods WrenVM::bindForeignClass(const char* module,
+                                                 const char* className)
+{
+  WrenForeignClassMethods methods{nullptr, nullptr};
+  auto it = modules_.find(module);
+  if (it == modules_.end()) return methods;
+  for (const auto& c : it->second->registration().classes)
+  {
+    if (c.className != className) continue;
+    methods.allocate = c.allocator;
+    methods.finalize = c.finalizer;
+    break;
+  }
+  return methods;
 }
 
 void wrenCollectGarbage(WrenVM* vm)
@@ -325,14 +458,9 @@ static WrenForeignMethodFn findForeignMethod(WrenVM* vm,
                                              bool isStatic,
                                              const char* signature)
 {
-  WrenForeignMethodFn method = nullptr;
-  
-  if (vm->config.bindForeignMethodFn != nullptr)
-  {
-    method = vm->config.bindForeignMethodFn(vm, moduleName, className, isStatic,
-                                            signature);
-  }
-  
+  WrenForeignMethodFn method = vm->bindForeignMethod(moduleName, className,
+                                                     isStatic, signature);
+
   // If the host didn't provide it, see if it's an optional one.
   if (method == nullptr)
   {
@@ -595,17 +723,10 @@ static Value validateSuperclass(WrenVM* vm, Value name, Value superclassValue,
 
 static void bindForeignClass(WrenVM* vm, ObjClass* classObj, ObjModule* module)
 {
-  WrenForeignClassMethods methods;
-  methods.allocate = nullptr;
-  methods.finalize = nullptr;
-  
-  // Check the optional built-in module first so the host can override it.
-  
-  if (vm->config.bindForeignClassFn != nullptr)
-  {
-    methods = vm->config.bindForeignClassFn(vm, module->name->value,
-                                            classObj->name->value);
-  }
+  // Let the host bind the class first so it can override the built-in
+  // optional modules.
+  WrenForeignClassMethods methods = vm->bindForeignClass(module->name->value,
+                                                         classObj->name->value);
 
   // If the host didn't provide it, see if it's a built in optional module.
   if (methods.allocate == nullptr && methods.finalize == nullptr)
@@ -741,79 +862,74 @@ void wrenFinalizeForeign(WrenVM* vm, ObjForeign* foreign)
   finalizer(foreign->data);
 }
 
-// Let the host resolve an imported module name if it wants to.
-static Value resolveModule(WrenVM* vm, Value name)
+// Lets the host resolve an imported module name if it wants to.
+static Value resolveModuleName(WrenVM* vm, Value name)
 {
-  // If the host doesn't care to resolve, leave the name alone.
-  if (vm->config.resolveModuleFn == nullptr) return name;
-
   ObjFiber* fiber = vm->fiber;
   ObjFn* fn = fiber->frames[fiber->numFrames - 1].closure->fn;
   ObjString* importer = fn->module->name;
-  
-  const char* resolved = vm->config.resolveModuleFn(vm, importer->value,
-                                                    AS_CSTRING(name));
-  if (resolved == nullptr)
+
+  std::optional<std::string> resolved = vm->resolveModule(
+      importer != nullptr
+          ? std::string_view(importer->value, importer->length)
+          : std::string_view(),
+      std::string_view(AS_STRING(name)->value, AS_STRING(name)->length));
+  if (!resolved)
   {
     vm->fiber->error = wrenStringFormat(vm,
         "Could not resolve module '@' imported from '@'.",
         name, OBJ_VAL(importer));
     return NULL_VAL;
   }
-  
+
   // If they resolved to the exact same string, we don't need to copy it.
-  if (resolved == AS_CSTRING(name)) return name;
+  if (*resolved == std::string_view(AS_STRING(name)->value,
+                                    AS_STRING(name)->length))
+  {
+    return name;
+  }
 
   // Copy the string into a Wren String object.
-  name = wrenNewString(vm, resolved);
-  DEALLOCATE(vm, (char*)resolved);
-  return name;
+  return wrenNewStringLength(vm, resolved->data(), resolved->size());
 }
 
 static Value importModule(WrenVM* vm, Value name)
 {
-  name = resolveModule(vm, name);
-  
+  name = resolveModuleName(vm, name);
+  if (IS_NULL(name)) return NULL_VAL;
+
   // If the module is already loaded, we don't need to do anything.
   Value existing = wrenMapGet(vm->modules, name);
   if (!IS_UNDEFINED(existing)) return existing;
 
   wrenPushRoot(vm, AS_OBJ(name));
 
-  WrenLoadModuleResult result = {0};
-  const char* source = nullptr;
-  
+  ObjString* nameString = AS_STRING(name);
+
   // Let the host try to provide the module.
-  if (vm->config.loadModuleFn != nullptr)
-  {
-    result = vm->config.loadModuleFn(vm, AS_CSTRING(name));
-  }
-  
+  std::string source = vm->loadModule(
+      std::string_view(nameString->value, nameString->length));
+
   // If the host didn't provide it, see if it's a built in optional module.
-  if (result.source == nullptr)
+  if (source.empty())
   {
-    result.onComplete = nullptr;
-    ObjString* nameString = AS_STRING(name);
 #if WREN_OPT_META
-    if (strcmp(nameString->value, "meta") == 0) result.source = wrenMetaSource();
+    if (strcmp(nameString->value, "meta") == 0) source = wrenMetaSource();
 #endif
 #if WREN_OPT_RANDOM
-    if (strcmp(nameString->value, "random") == 0) result.source = wrenRandomSource();
+    if (strcmp(nameString->value, "random") == 0) source = wrenRandomSource();
 #endif
   }
-  
-  if (result.source == nullptr)
+
+  if (source.empty())
   {
     vm->fiber->error = wrenStringFormat(vm, "Could not load module '@'.", name);
     wrenPopRoot(vm); // name.
     return NULL_VAL;
   }
-  
-  ObjClosure* moduleClosure = compileInModule(vm, name, result.source, false, true);
-  
-  // Now that we're done, give the result back in case there's cleanup to do.
-  if(result.onComplete) result.onComplete(vm, AS_CSTRING(name), result);
-  
+
+  ObjClosure* moduleClosure = compileInModule(vm, name, source.c_str(), false, true);
+
   if (moduleClosure == nullptr)
   {
     vm->fiber->error = wrenStringFormat(vm,

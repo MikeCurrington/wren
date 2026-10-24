@@ -13,22 +13,7 @@ static WrenVM* vm = NULL;
 
 static WrenVM* initVM(bool isAPITest)
 {
-  WrenConfiguration config;
-  wrenInitConfiguration(&config);
-
-  config.resolveModuleFn = resolveModule;
-  config.loadModuleFn = readModule;
-  config.writeFn = vm_write;
-  config.errorFn = reportError;
-
-  if(isAPITest) {
-    config.bindForeignClassFn = APITest_bindForeignClass;
-    config.bindForeignMethodFn = APITest_bindForeignMethod;
-  }
-
-  // Since we're running in a standalone process, be generous with memory.
-  config.initialHeapSize = 1024 * 1024 * 100;
-  return wrenNewVM(&config);
+  return new TestVM(isAPITest);
 }
 
 int main(int argc, const char* argv[]) {
@@ -47,10 +32,10 @@ int main(int argc, const char* argv[]) {
     exitCode = APITest_Run(vm, testName);
   }
 
+  delete vm;
+
   if (result == WREN_RESULT_COMPILE_ERROR) return WREN_EX_DATAERR;
   if (result == WREN_RESULT_RUNTIME_ERROR) return WREN_EX_SOFTWARE;
-
-  wrenFreeVM(vm);
 
   return exitCode;
 

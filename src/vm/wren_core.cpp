@@ -1245,10 +1245,7 @@ DEF_PRIMITIVE(system_gc)
 
 DEF_PRIMITIVE(system_writeString)
 {
-  if (vm->config.writeFn != nullptr)
-  {
-    vm->config.writeFn(vm, AS_CSTRING(args[1]));
-  }
+  vm->write(AS_CSTRING(args[1]));
 
   RETURN_VAL(args[1]);
 }

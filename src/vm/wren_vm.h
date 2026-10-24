@@ -6,6 +6,20 @@
 #include "wren_value.h"
 #include "wren_utils.h"
 
+#include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+
+#include "../include/wren_debugger.h"
+
+namespace wren
+{
+  class Module;
+  class Handle;
+}
+
 // The maximum number of temporary objects that can be made visible to the GC
 // at one time.
 #define WREN_MAX_TEMP_ROOTS 8
@@ -54,7 +68,172 @@ struct WrenVM
   WrenVM(const WrenVM&) = delete;
   WrenVM& operator=(const WrenVM&) = delete;
 
-  WrenVM(const WrenConfiguration* config) noexcept;
+  // C++ host configuration: the plain Wren settings plus debugger options.
+  struct Config
+  {
+    WrenConfiguration wrenConfig;
+
+    // The port the debugger listens on (127.0.0.1) (if enabled)
+    int debugPort = 4711;
+
+    Config() { wrenInitConfiguration(&wrenConfig); }
+  };
+
+  explicit WrenVM(Config config = Config());
+  virtual ~WrenVM();
+
+  // ---------------------------------------------------------------------
+  // Host callbacks. Subclasses override these to customize the VM; they
+  // replace the function-pointer callbacks the old C API used to install
+  // through WrenConfiguration.
+  // ---------------------------------------------------------------------
+
+  // Displays a string of text to the user (System.print and friends). The
+  // default discards the text, mirroring it to the attached debugger's
+  // console (if any).
+  virtual void write(const char* text)
+  {
+#ifdef WREN_ENABLE_DEBUGGER
+    if (debugger_) debugger_->writeOutput(text);
+#else
+    (void)text;
+#endif
+  }
+
+  // Reports an error to the user. A compile-time error is reported once with
+  // WREN_ERROR_COMPILE, the module and line where the error occurs, and the
+  // compiler's message. A runtime error is reported with WREN_ERROR_RUNTIME
+  // and no module or line, followed by one WREN_ERROR_STACK_TRACE call per
+  // stack frame. The default discards errors, mirroring them to the attached
+  // debugger's console (if any).
+  virtual void error(WrenErrorType type, const char* module, int line,
+                     const char* message)
+  {
+#ifdef WREN_ENABLE_DEBUGGER
+    if (!debugger_) return;
+    std::string text;
+    if (type == WREN_ERROR_COMPILE)
+    {
+      text = "[" + std::string(module ? module : "?") + " line " +
+             std::to_string(line) + "] " + message + "\n";
+    }
+    else if (type == WREN_ERROR_RUNTIME)
+    {
+      text = std::string(message) + "\n";
+    }
+    else
+    {
+      text = "[" + std::string(module ? module : "?") + " line " +
+             std::to_string(line) + "] in " + message + "\n";
+    }
+    debugger_->writeOutput(text);
+#else
+    (void)type; (void)module; (void)line; (void)message;
+#endif
+  }
+
+  // Gives the host a chance to canonicalize the imported module name,
+  // potentially taking into account the name of the module that contains the
+  // import. The default implements relative imports: a name starting with
+  // "./" or "../" is resolved against the importing module's directory.
+  // Return nullopt to report the import as a runtime error.
+  virtual std::optional<std::string> resolveModule(std::string_view importer,
+                                                   std::string_view name);
+
+  // Loads and returns the source code for the module [name], or an empty
+  // string if the module is not found. This is only called the first time a
+  // given module name is imported. The default serves the source generated
+  // for modules registered through module().
+  virtual std::string loadModule(std::string_view name);
+
+  // Returns a pointer to the foreign method for [signature] on [className]
+  // in [module], or NULL if not found. The default looks up methods
+  // registered through module()/Foreign<T>.
+  virtual WrenForeignMethodFn bindForeignMethod(const char* module,
+                                                const char* className,
+                                                bool isStatic,
+                                                const char* signature);
+
+  // Returns the functions used to allocate and finalize instances of
+  // [className] in [module]. The default looks up classes registered through
+  // module()/Foreign<T>.
+  virtual WrenForeignClassMethods bindForeignClass(const char* module,
+                                                   const char* className);
+
+  // Invoked from the interpreter loop on each new source line when a debug
+  // hook is in use. The default forwards to the hook installed with
+  // wrenSetDebugHook(), which is how the debugger attaches.
+  virtual void onDebugEvent(WrenDebugEvent event)
+  {
+    if (debugHook != nullptr) debugHook(this, event, debugHookData);
+  }
+
+  // ---------------------------------------------------------------------
+  // Host API.
+  // ---------------------------------------------------------------------
+
+  // The raw WrenVM (this object; kept for source compatibility with the
+  // former wren::VM wrapper).
+  WrenVM* raw() const { return const_cast<WrenVM*>(this); }
+
+  // The VM's debugger, or nullptr.
+  wren::debug::Debugger* debugger() const { return debugger_.get(); }
+
+  void setDebugger(std::unique_ptr<wren::debug::Debugger> debugger)
+  {
+    debugger_ = std::move(debugger);
+  }
+
+  // Tells the debugger that Wren module [module] was loaded from [path], so
+  // VS Code can map source files to module names for breakpoints. No-op
+  // unless a debugger is attached. wren.hpp itself has no filesystem notion,
+  // so file-loading hosts call this per module.
+  void registerModulePath(std::string_view module, std::string_view path)
+  {
+    if (debugger_)
+    {
+      debugger_->registerModulePath(std::string(module), std::string(path));
+    }
+  }
+
+  // Accesses (creating if needed) the module named [name], whose foreign
+  // classes can be registered through Foreign<T>. Defined in wren.hpp.
+  wren::Module& module(std::string name);
+
+  WrenInterpretResult interpret(std::string_view mod, std::string_view src)
+  {
+    return wrenInterpret(this, std::string(mod).c_str(), std::string(src).c_str());
+  }
+
+  // A RAII handle for calling a method with [sig]. Defined in wren.hpp.
+  wren::Handle callHandle(std::string_view sig);
+
+  void getVariable(std::string_view mod, std::string_view name, int slot)
+  {
+    wrenEnsureSlots(this, slot + 1);
+    wrenGetVariable(this, std::string(mod).c_str(), std::string(name).c_str(), slot);
+  }
+
+  void collectGarbage() { wrenCollectGarbage(this); }
+  void* userData() const { return wrenGetUserData(this); }
+  void setUserData(void* data) { wrenSetUserData(this, data); }
+
+  // Get a foreign object from a slot as a typed reference. Defined in
+  // wren.hpp (needs the converters).
+  template <typename T> T get(int slot);
+  // Get a shared_ptr to a foreign object — enables C++ to keep the object
+  // alive.
+  template <typename T> std::shared_ptr<T> getShared(int slot);
+  // Set a slot to a foreign object (copies/moves the value into a new
+  // wrapper).
+  template <typename T> void set(int slot, T&& value);
+  // Set a slot from an existing shared_ptr — shares ownership, no copy.
+  template <typename T> void setShared(int slot, std::shared_ptr<T> ptr);
+
+  void setNull(int slot) { wrenSetSlotNull(this, slot); }
+  int slotCount() const { return wrenGetSlotCount(this); }
+  void ensureSlots(int n) { wrenEnsureSlots(this, n); }
+  WrenType slotType(int s) const { return wrenGetSlotType(this, s); }
 
   ObjClass* boolClass = nullptr;
   ObjClass* classClass = nullptr;
@@ -158,6 +337,23 @@ struct WrenVM
   // top. This remembers the real top so that the frame inspection functions
   // still report the frame's own slots. NULL when the hook isn't running.
   Value* debugSavedStackTop = nullptr;
+
+  // ---------------------------------------------------------------------
+  // State absorbed from the former wren::VM C++ wrapper.
+  // ---------------------------------------------------------------------
+
+  // The port the debugger listens on (127.0.0.1), from Config.
+  int debugPort = 4711;
+
+  // Foreign classes and methods registered from C++ through module(). The
+  // default bindForeignMethod()/bindForeignClass()/loadModule()
+  // implementations serve these. Module is defined in wren.hpp; it is only
+  // complete where those are defined (wren.hpp / wren_vm.cpp).
+  std::unordered_map<std::string, std::unique_ptr<wren::Module>> modules_;
+
+  // The attached debugger, if any. Detached in ~WrenVM while the VM is still
+  // valid, since it holds WrenHandles and the debug hook.
+  std::unique_ptr<wren::debug::Debugger> debugger_;
 };
 
 // A generic allocation function that handles all explicit memory management.
