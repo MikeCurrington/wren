@@ -39,3 +39,11 @@ ipch/
 
 # macOS
 .DS_Store
+
+# AI
+.clinerules
+.zcode/
+
+# build
+projects/
+
