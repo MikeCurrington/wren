@@ -520,6 +520,14 @@ private:
   int DumpInstruction(ObjFn* fn, int i);
   int DumpInstruction(ObjFn* fn, int i, int* lastLine);
 
+  // The core library primitives. They are static members so that they can
+  // access private VM state while still being stored in method tables
+  // through the Primitive function-pointer typedef. Declared from
+  // wren_core_prims.inc, defined and registered in wren_core.cpp.
+#define PRIM(name) static bool Prim##name(WrenVM* vm, Value* args);
+#include "wren_core_prims.inc"
+#undef PRIM
+
   // The exported C API functions in wren.h, which forward to the private
   // members above.
   friend bool wrenGetSlotBool(WrenVM* vm, int slot);

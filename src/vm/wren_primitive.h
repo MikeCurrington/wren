@@ -8,10 +8,10 @@
 #define PRIMITIVE(cls, name, function)                                         \
     do                                                                         \
     {                                                                          \
-      int symbol = vm->methodNames.ensure(vm, name, strlen(name));             \
+      int symbol = vm->EnsureMethodName(name, strlen(name));             \
       Method method;                                                           \
       method.type = METHOD_PRIMITIVE;                                          \
-      method.as.primitive = prim_##function;                                   \
+      method.as.primitive = &WrenVM::Prim##function;                                   \
       vm->AddMethod(cls, symbol, method);                                 \
     } while (false)
 
@@ -20,10 +20,10 @@
 #define FUNCTION_CALL(cls, name, function)                                     \
     do                                                                         \
     {                                                                          \
-      int symbol = vm->methodNames.ensure(vm, name, strlen(name));             \
+      int symbol = vm->EnsureMethodName(name, strlen(name));             \
       Method method;                                                           \
       method.type = METHOD_FUNCTION_CALL;                                      \
-      method.as.primitive = prim_##function;                                   \
+      method.as.primitive = &WrenVM::Prim##function;                                   \
       vm->AddMethod(cls, symbol, method);                                 \
     } while (false)
 
@@ -31,7 +31,7 @@
 // the actual type signature of a primitive function and makes it clear which C
 // functions are invoked as primitives.
 #define DEF_PRIMITIVE(name)                                                    \
-    static bool prim_##name(WrenVM* vm, Value* args)
+    bool WrenVM::Prim##name(WrenVM* vm, Value* args)
 
 #define RETURN_VAL(value)                                                      \
     do                                                                         \

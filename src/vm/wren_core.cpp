@@ -13,12 +13,12 @@
 
 #include "wren_core.wren.inc"
 
-DEF_PRIMITIVE(bool_not)
+DEF_PRIMITIVE(BoolNot)
 {
   RETURN_BOOL(!AS_BOOL(args[0]));
 }
 
-DEF_PRIMITIVE(bool_toString)
+DEF_PRIMITIVE(BoolToString)
 {
   if (AS_BOOL(args[0]))
   {
@@ -30,12 +30,12 @@ DEF_PRIMITIVE(bool_toString)
   }
 }
 
-DEF_PRIMITIVE(class_name)
+DEF_PRIMITIVE(ClassName)
 {
   RETURN_OBJ(AS_CLASS(args[0])->name);
 }
 
-DEF_PRIMITIVE(class_supertype)
+DEF_PRIMITIVE(ClassSupertype)
 {
   ObjClass* classObj = AS_CLASS(args[0]);
 
@@ -45,17 +45,17 @@ DEF_PRIMITIVE(class_supertype)
   RETURN_OBJ(classObj->superclass);
 }
 
-DEF_PRIMITIVE(class_toString)
+DEF_PRIMITIVE(ClassToString)
 {
   RETURN_OBJ(AS_CLASS(args[0])->name);
 }
 
-DEF_PRIMITIVE(class_attributes)
+DEF_PRIMITIVE(ClassAttributes)
 {
   RETURN_VAL(AS_CLASS(args[0])->attributes);
 }
 
-DEF_PRIMITIVE(fiber_new)
+DEF_PRIMITIVE(FiberNew)
 {
   if (!validateFn(vm, args[1], "Argument")) return false;
 
@@ -68,7 +68,7 @@ DEF_PRIMITIVE(fiber_new)
   RETURN_OBJ(wrenConstruct<ObjFiber>(vm, 0, closure));
 }
 
-DEF_PRIMITIVE(fiber_abort)
+DEF_PRIMITIVE(FiberAbort)
 {
   vm->Fiber()->error = args[1];
 
@@ -154,27 +154,27 @@ bool WrenVM::RunFiber(ObjFiber* fiber, Value* args, bool isCall,
   return false;
 }
 
-DEF_PRIMITIVE(fiber_call)
+DEF_PRIMITIVE(FiberCall)
 {
   return vm->RunFiber(AS_FIBER(args[0]), args, true, false, "call");
 }
 
-DEF_PRIMITIVE(fiber_call1)
+DEF_PRIMITIVE(FiberCall1)
 {
   return vm->RunFiber(AS_FIBER(args[0]), args, true, true, "call");
 }
 
-DEF_PRIMITIVE(fiber_current)
+DEF_PRIMITIVE(FiberCurrent)
 {
   RETURN_OBJ(vm->Fiber());
 }
 
-DEF_PRIMITIVE(fiber_error)
+DEF_PRIMITIVE(FiberError)
 {
   RETURN_VAL(AS_FIBER(args[0])->error);
 }
 
-DEF_PRIMITIVE(fiber_exit)
+DEF_PRIMITIVE(FiberExit)
 {
   ObjFiber* current = vm->Fiber();
 
@@ -208,13 +208,13 @@ DEF_PRIMITIVE(fiber_exit)
   return false;
 }
 
-DEF_PRIMITIVE(fiber_isDone)
+DEF_PRIMITIVE(FiberIsDone)
 {
   ObjFiber* runFiber = AS_FIBER(args[0]);
   RETURN_BOOL(runFiber->numFrames == 0 || wrenHasError(runFiber));
 }
 
-DEF_PRIMITIVE(fiber_suspend)
+DEF_PRIMITIVE(FiberSuspend)
 {
   // Switching to a null fiber tells the interpreter to stop and exit.
   vm->SetFiber(nullptr);
@@ -222,24 +222,24 @@ DEF_PRIMITIVE(fiber_suspend)
   return false;
 }
 
-DEF_PRIMITIVE(fiber_transfer)
+DEF_PRIMITIVE(FiberTransfer)
 {
   return vm->RunFiber(AS_FIBER(args[0]), args, false, false, "transfer to");
 }
 
-DEF_PRIMITIVE(fiber_transfer1)
+DEF_PRIMITIVE(FiberTransfer1)
 {
   return vm->RunFiber(AS_FIBER(args[0]), args, false, true, "transfer to");
 }
 
-DEF_PRIMITIVE(fiber_transferError)
+DEF_PRIMITIVE(FiberTransferError)
 {
   vm->RunFiber(AS_FIBER(args[0]), args, false, true, "transfer to");
   vm->Fiber()->error = args[1];
   return false;
 }
 
-DEF_PRIMITIVE(fiber_try)
+DEF_PRIMITIVE(FiberTry)
 {
   vm->RunFiber(AS_FIBER(args[0]), args, true, false, "try");
   
@@ -248,7 +248,7 @@ DEF_PRIMITIVE(fiber_try)
   return false;
 }
 
-DEF_PRIMITIVE(fiber_try1)
+DEF_PRIMITIVE(FiberTry1)
 {
   vm->RunFiber(AS_FIBER(args[0]), args, true, true, "try");
   
@@ -257,7 +257,7 @@ DEF_PRIMITIVE(fiber_try1)
   return false;
 }
 
-DEF_PRIMITIVE(fiber_yield)
+DEF_PRIMITIVE(FiberYield)
 {
   ObjFiber* current = vm->Fiber();
   vm->SetFiber(current->caller);
@@ -275,7 +275,7 @@ DEF_PRIMITIVE(fiber_yield)
   return false;
 }
 
-DEF_PRIMITIVE(fiber_yield1)
+DEF_PRIMITIVE(FiberYield1)
 {
   ObjFiber* current = vm->Fiber();
   vm->SetFiber(current->caller);
@@ -299,7 +299,7 @@ DEF_PRIMITIVE(fiber_yield1)
   return false;
 }
 
-DEF_PRIMITIVE(fn_new)
+DEF_PRIMITIVE(FnNew)
 {
   if (!validateFn(vm, args[1], "Argument")) return false;
 
@@ -307,7 +307,7 @@ DEF_PRIMITIVE(fn_new)
   RETURN_VAL(args[1]);
 }
 
-DEF_PRIMITIVE(fn_arity)
+DEF_PRIMITIVE(FnArity)
 {
   RETURN_NUM(AS_CLOSURE(args[0])->fn->arity);
 }
@@ -319,7 +319,7 @@ void WrenVM::CallFn(Value* args, int numArgs)
 }
 
 #define DEF_FN_CALL(numArgs)                                                   \
-    DEF_PRIMITIVE(fn_call##numArgs)                                            \
+    DEF_PRIMITIVE(FnCall##numArgs)                                            \
     {                                                                          \
       vm->CallFn(args, numArgs);                                              \
       return false;                                                            \
@@ -343,13 +343,13 @@ DEF_FN_CALL(14)
 DEF_FN_CALL(15)
 DEF_FN_CALL(16)
 
-DEF_PRIMITIVE(fn_toString)
+DEF_PRIMITIVE(FnToString)
 {
   RETURN_VAL(CONST_STRING(vm, "<fn>"));
 }
 
 // Creates a new list of size args[1], with all elements initialized to args[2].
-DEF_PRIMITIVE(list_filled)
+DEF_PRIMITIVE(ListFilled)
 {
   if (!validateInt(vm, args[1], "Size")) return false;  
   if (AS_NUM(args[1]) < 0) RETURN_ERROR("Size cannot be negative.");
@@ -365,12 +365,12 @@ DEF_PRIMITIVE(list_filled)
   RETURN_OBJ(list);
 }
 
-DEF_PRIMITIVE(list_new)
+DEF_PRIMITIVE(ListNew)
 {
   RETURN_OBJ(wrenConstruct<ObjList>(vm, 0, 0));
 }
 
-DEF_PRIMITIVE(list_add)
+DEF_PRIMITIVE(ListAdd)
 {
   AS_LIST(args[0])->elements.push_back(args[1]);
   RETURN_VAL(args[1]);
@@ -379,7 +379,7 @@ DEF_PRIMITIVE(list_add)
 // Adds an element to the list and then returns the list itself. This is called
 // by the compiler when compiling list literals instead of using add() to
 // minimize stack churn.
-DEF_PRIMITIVE(list_addCore)
+DEF_PRIMITIVE(ListAddCore)
 {
   AS_LIST(args[0])->elements.push_back(args[1]);
   
@@ -387,18 +387,18 @@ DEF_PRIMITIVE(list_addCore)
   RETURN_VAL(args[0]);
 }
 
-DEF_PRIMITIVE(list_clear)
+DEF_PRIMITIVE(ListClear)
 {
   AS_LIST(args[0])->elements.clear();
   RETURN_NULL;
 }
 
-DEF_PRIMITIVE(list_count)
+DEF_PRIMITIVE(ListCount)
 {
   RETURN_NUM(AS_LIST(args[0])->elements.size());
 }
 
-DEF_PRIMITIVE(list_insert)
+DEF_PRIMITIVE(ListInsert)
 {
   ObjList* list = AS_LIST(args[0]);
 
@@ -411,7 +411,7 @@ DEF_PRIMITIVE(list_insert)
   RETURN_VAL(args[2]);
 }
 
-DEF_PRIMITIVE(list_iterate)
+DEF_PRIMITIVE(ListIterate)
 {
   ObjList* list = AS_LIST(args[0]);
 
@@ -432,7 +432,7 @@ DEF_PRIMITIVE(list_iterate)
   RETURN_NUM(index + 1);
 }
 
-DEF_PRIMITIVE(list_iteratorValue)
+DEF_PRIMITIVE(ListIteratorValue)
 {
   ObjList* list = AS_LIST(args[0]);
   uint32_t index = validateIndex(vm, args[1], list->elements.size(), "Iterator");
@@ -441,7 +441,7 @@ DEF_PRIMITIVE(list_iteratorValue)
   RETURN_VAL(list->elements[index]);
 }
 
-DEF_PRIMITIVE(list_removeAt)
+DEF_PRIMITIVE(ListRemoveAt)
 {
   ObjList* list = AS_LIST(args[0]);
   uint32_t index = validateIndex(vm, args[1], list->elements.size(), "Index");
@@ -450,7 +450,7 @@ DEF_PRIMITIVE(list_removeAt)
   RETURN_VAL(vm->ListRemoveAt( list, index));
 }
 
-DEF_PRIMITIVE(list_swap)
+DEF_PRIMITIVE(ListSwap)
 {
   ObjList* list = AS_LIST(args[0]);
   uint32_t indexA = validateIndex(vm, args[1], list->elements.size(), "Index 0");
@@ -465,7 +465,7 @@ DEF_PRIMITIVE(list_swap)
   RETURN_NULL;
 }
 
-DEF_PRIMITIVE(list_subscript)
+DEF_PRIMITIVE(ListSubscript)
 {
   ObjList* list = AS_LIST(args[0]);
 
@@ -497,7 +497,7 @@ DEF_PRIMITIVE(list_subscript)
   RETURN_OBJ(result);
 }
 
-DEF_PRIMITIVE(list_subscriptSetter)
+DEF_PRIMITIVE(ListSubscriptSetter)
 {
   ObjList* list = AS_LIST(args[0]);
   uint32_t index = validateIndex(vm, args[1], list->elements.size(),
@@ -508,12 +508,12 @@ DEF_PRIMITIVE(list_subscriptSetter)
   RETURN_VAL(args[2]);
 }
 
-DEF_PRIMITIVE(map_new)
+DEF_PRIMITIVE(MapNew)
 {
   RETURN_OBJ(wrenConstruct<ObjMap>(vm, 0));
 }
 
-DEF_PRIMITIVE(map_subscript)
+DEF_PRIMITIVE(MapSubscript)
 {
   if (!validateKey(vm, args[1])) return false;
 
@@ -524,7 +524,7 @@ DEF_PRIMITIVE(map_subscript)
   RETURN_VAL(value);
 }
 
-DEF_PRIMITIVE(map_subscriptSetter)
+DEF_PRIMITIVE(MapSubscriptSetter)
 {
   if (!validateKey(vm, args[1])) return false;
 
@@ -535,7 +535,7 @@ DEF_PRIMITIVE(map_subscriptSetter)
 // Adds an entry to the map and then returns the map itself. This is called by
 // the compiler when compiling map literals instead of using [_]=(_) to
 // minimize stack churn.
-DEF_PRIMITIVE(map_addCore)
+DEF_PRIMITIVE(MapAddCore)
 {
   if (!validateKey(vm, args[1])) return false;
   
@@ -545,25 +545,25 @@ DEF_PRIMITIVE(map_addCore)
   RETURN_VAL(args[0]);
 }
 
-DEF_PRIMITIVE(map_clear)
+DEF_PRIMITIVE(MapClear)
 {
   vm->MapClear( AS_MAP(args[0]));
   RETURN_NULL;
 }
 
-DEF_PRIMITIVE(map_containsKey)
+DEF_PRIMITIVE(MapContainsKey)
 {
   if (!validateKey(vm, args[1])) return false;
 
   RETURN_BOOL(!IS_UNDEFINED(wrenMapGet(AS_MAP(args[0]), args[1])));
 }
 
-DEF_PRIMITIVE(map_count)
+DEF_PRIMITIVE(MapCount)
 {
   RETURN_NUM(AS_MAP(args[0])->count);
 }
 
-DEF_PRIMITIVE(map_iterate)
+DEF_PRIMITIVE(MapIterate)
 {
   ObjMap* map = AS_MAP(args[0]);
 
@@ -596,14 +596,14 @@ DEF_PRIMITIVE(map_iterate)
   RETURN_FALSE;
 }
 
-DEF_PRIMITIVE(map_remove)
+DEF_PRIMITIVE(MapRemove)
 {
   if (!validateKey(vm, args[1])) return false;
 
   RETURN_VAL(vm->MapRemoveKey( AS_MAP(args[0]), args[1]));
 }
 
-DEF_PRIMITIVE(map_keyIteratorValue)
+DEF_PRIMITIVE(MapKeyIteratorValue)
 {
   ObjMap* map = AS_MAP(args[0]);
   uint32_t index = validateIndex(vm, args[1], map->capacity, "Iterator");
@@ -618,7 +618,7 @@ DEF_PRIMITIVE(map_keyIteratorValue)
   RETURN_VAL(entry->key);
 }
 
-DEF_PRIMITIVE(map_valueIteratorValue)
+DEF_PRIMITIVE(MapValueIteratorValue)
 {
   ObjMap* map = AS_MAP(args[0]);
   uint32_t index = validateIndex(vm, args[1], map->capacity, "Iterator");
@@ -633,17 +633,17 @@ DEF_PRIMITIVE(map_valueIteratorValue)
   RETURN_VAL(entry->value);
 }
 
-DEF_PRIMITIVE(null_not)
+DEF_PRIMITIVE(NullNot)
 {
   RETURN_VAL(TRUE_VAL);
 }
 
-DEF_PRIMITIVE(null_toString)
+DEF_PRIMITIVE(NullToString)
 {
   RETURN_VAL(CONST_STRING(vm, "null"));
 }
 
-DEF_PRIMITIVE(num_fromString)
+DEF_PRIMITIVE(NumFromString)
 {
   if (!validateString(vm, args[1], "Argument")) return false;
 
@@ -670,42 +670,42 @@ DEF_PRIMITIVE(num_fromString)
 
 // Defines a primitive on Num that calls infix [op] and returns [type].
 #define DEF_NUM_CONSTANT(name, value)                                          \
-    DEF_PRIMITIVE(num_##name)                                                  \
+    DEF_PRIMITIVE(Num##name)                                                  \
     {                                                                          \
       RETURN_NUM(value);                                                       \
     }
 
-DEF_NUM_CONSTANT(infinity, INFINITY)
-DEF_NUM_CONSTANT(nan,      WREN_DOUBLE_NAN)
-DEF_NUM_CONSTANT(pi,       3.14159265358979323846264338327950288)
-DEF_NUM_CONSTANT(tau,      6.28318530717958647692528676655900577)
+DEF_NUM_CONSTANT(Infinity, INFINITY)
+DEF_NUM_CONSTANT(Nan,      WREN_DOUBLE_NAN)
+DEF_NUM_CONSTANT(Pi,       3.14159265358979323846264338327950288)
+DEF_NUM_CONSTANT(Tau,      6.28318530717958647692528676655900577)
 
-DEF_NUM_CONSTANT(largest,  DBL_MAX)
-DEF_NUM_CONSTANT(smallest, DBL_MIN)
+DEF_NUM_CONSTANT(Largest,  DBL_MAX)
+DEF_NUM_CONSTANT(Smallest, DBL_MIN)
 
-DEF_NUM_CONSTANT(maxSafeInteger, 9007199254740991.0)
-DEF_NUM_CONSTANT(minSafeInteger, -9007199254740991.0)
+DEF_NUM_CONSTANT(MaxSafeInteger, 9007199254740991.0)
+DEF_NUM_CONSTANT(MinSafeInteger, -9007199254740991.0)
 
 // Defines a primitive on Num that calls infix [op] and returns [type].
 #define DEF_NUM_INFIX(name, op, type)                                          \
-    DEF_PRIMITIVE(num_##name)                                                  \
+    DEF_PRIMITIVE(Num##name)                                                  \
     {                                                                          \
       if (!validateNum(vm, args[1], "Right operand")) return false;            \
       RETURN_##type(AS_NUM(args[0]) op AS_NUM(args[1]));                       \
     }
 
-DEF_NUM_INFIX(minus,    -,  NUM)
-DEF_NUM_INFIX(plus,     +,  NUM)
-DEF_NUM_INFIX(multiply, *,  NUM)
-DEF_NUM_INFIX(divide,   /,  NUM)
-DEF_NUM_INFIX(lt,       <,  BOOL)
-DEF_NUM_INFIX(gt,       >,  BOOL)
-DEF_NUM_INFIX(lte,      <=, BOOL)
-DEF_NUM_INFIX(gte,      >=, BOOL)
+DEF_NUM_INFIX(Minus,    -,  NUM)
+DEF_NUM_INFIX(Plus,     +,  NUM)
+DEF_NUM_INFIX(Multiply, *,  NUM)
+DEF_NUM_INFIX(Divide,   /,  NUM)
+DEF_NUM_INFIX(Lt,       <,  BOOL)
+DEF_NUM_INFIX(Gt,       >,  BOOL)
+DEF_NUM_INFIX(Lte,      <=, BOOL)
+DEF_NUM_INFIX(Gte,      >=, BOOL)
 
 // Defines a primitive on Num that call infix bitwise [op].
 #define DEF_NUM_BITWISE(name, op)                                              \
-    DEF_PRIMITIVE(num_bitwise##name)                                           \
+    DEF_PRIMITIVE(NumBitwise##name)                                           \
     {                                                                          \
       if (!validateNum(vm, args[1], "Right operand")) return false;            \
       uint32_t left = (uint32_t)AS_NUM(args[0]);                               \
@@ -721,53 +721,53 @@ DEF_NUM_BITWISE(RightShift, >>)
 
 // Defines a primitive method on Num that returns the result of [fn].
 #define DEF_NUM_FN(name, fn)                                                   \
-    DEF_PRIMITIVE(num_##name)                                                  \
+    DEF_PRIMITIVE(Num##name)                                                  \
     {                                                                          \
       RETURN_NUM(fn(AS_NUM(args[0])));                                         \
     }
 
-DEF_NUM_FN(abs,     fabs)
-DEF_NUM_FN(acos,    acos)
-DEF_NUM_FN(asin,    asin)
-DEF_NUM_FN(atan,    atan)
-DEF_NUM_FN(cbrt,    cbrt)
-DEF_NUM_FN(ceil,    ceil)
-DEF_NUM_FN(cos,     cos)
-DEF_NUM_FN(floor,   floor)
-DEF_NUM_FN(negate,  -)
-DEF_NUM_FN(round,   round)
-DEF_NUM_FN(sin,     sin)
-DEF_NUM_FN(sqrt,    sqrt)
-DEF_NUM_FN(tan,     tan)
-DEF_NUM_FN(log,     log)
-DEF_NUM_FN(log2,    log2)
-DEF_NUM_FN(exp,     exp)
+DEF_NUM_FN(Abs,     fabs)
+DEF_NUM_FN(Acos,    acos)
+DEF_NUM_FN(Asin,    asin)
+DEF_NUM_FN(Atan,    atan)
+DEF_NUM_FN(Cbrt,    cbrt)
+DEF_NUM_FN(Ceil,    ceil)
+DEF_NUM_FN(Cos,     cos)
+DEF_NUM_FN(Floor,   floor)
+DEF_NUM_FN(Negate,  -)
+DEF_NUM_FN(Round,   round)
+DEF_NUM_FN(Sin,     sin)
+DEF_NUM_FN(Sqrt,    sqrt)
+DEF_NUM_FN(Tan,     tan)
+DEF_NUM_FN(Log,     log)
+DEF_NUM_FN(Log2,    log2)
+DEF_NUM_FN(Exp,     exp)
 
-DEF_PRIMITIVE(num_mod)
+DEF_PRIMITIVE(NumMod)
 {
   if (!validateNum(vm, args[1], "Right operand")) return false;
   RETURN_NUM(fmod(AS_NUM(args[0]), AS_NUM(args[1])));
 }
 
-DEF_PRIMITIVE(num_eqeq)
+DEF_PRIMITIVE(NumEqeq)
 {
   if (!IS_NUM(args[1])) RETURN_FALSE;
   RETURN_BOOL(AS_NUM(args[0]) == AS_NUM(args[1]));
 }
 
-DEF_PRIMITIVE(num_bangeq)
+DEF_PRIMITIVE(NumBangeq)
 {
   if (!IS_NUM(args[1])) RETURN_TRUE;
   RETURN_BOOL(AS_NUM(args[0]) != AS_NUM(args[1]));
 }
 
-DEF_PRIMITIVE(num_bitwiseNot)
+DEF_PRIMITIVE(NumBitwiseNot)
 {
   // Bitwise operators always work on 32-bit unsigned ints.
   RETURN_NUM(~(uint32_t)AS_NUM(args[0]));
 }
 
-DEF_PRIMITIVE(num_dotDot)
+DEF_PRIMITIVE(NumDotDot)
 {
   if (!validateNum(vm, args[1], "Right hand side of range")) return false;
 
@@ -776,7 +776,7 @@ DEF_PRIMITIVE(num_dotDot)
   RETURN_VAL(OBJ_VAL(wrenConstruct<ObjRange>(vm, 0, from, to, true)));
 }
 
-DEF_PRIMITIVE(num_dotDotDot)
+DEF_PRIMITIVE(NumDotDotDot)
 {
   if (!validateNum(vm, args[1], "Right hand side of range")) return false;
 
@@ -785,14 +785,14 @@ DEF_PRIMITIVE(num_dotDotDot)
   RETURN_VAL(OBJ_VAL(wrenConstruct<ObjRange>(vm, 0, from, to, false)));
 }
 
-DEF_PRIMITIVE(num_atan2)
+DEF_PRIMITIVE(NumAtan2)
 {
   if (!validateNum(vm, args[1], "x value")) return false;
 
   RETURN_NUM(atan2(AS_NUM(args[0]), AS_NUM(args[1])));
 }
 
-DEF_PRIMITIVE(num_min)
+DEF_PRIMITIVE(NumMin)
 {
   if (!validateNum(vm, args[1], "Other value")) return false;
 
@@ -801,7 +801,7 @@ DEF_PRIMITIVE(num_min)
   RETURN_NUM(value <= other ? value : other);
 }
 
-DEF_PRIMITIVE(num_max)
+DEF_PRIMITIVE(NumMax)
 {
   if (!validateNum(vm, args[1], "Other value")) return false;
 
@@ -810,7 +810,7 @@ DEF_PRIMITIVE(num_max)
   RETURN_NUM(value > other ? value : other);
 }
 
-DEF_PRIMITIVE(num_clamp)
+DEF_PRIMITIVE(NumClamp)
 {
   if (!validateNum(vm, args[1], "Min value")) return false;
   if (!validateNum(vm, args[2], "Max value")) return false;
@@ -822,37 +822,37 @@ DEF_PRIMITIVE(num_clamp)
   RETURN_NUM(result);
 }
 
-DEF_PRIMITIVE(num_pow)
+DEF_PRIMITIVE(NumPow)
 {
   if (!validateNum(vm, args[1], "Power value")) return false;
 
   RETURN_NUM(pow(AS_NUM(args[0]), AS_NUM(args[1])));
 }
 
-DEF_PRIMITIVE(num_fraction)
+DEF_PRIMITIVE(NumFraction)
 {
   double unused;
   RETURN_NUM(modf(AS_NUM(args[0]) , &unused));
 }
 
-DEF_PRIMITIVE(num_isInfinity)
+DEF_PRIMITIVE(NumIsInfinity)
 {
   RETURN_BOOL(isinf(AS_NUM(args[0])));
 }
 
-DEF_PRIMITIVE(num_isInteger)
+DEF_PRIMITIVE(NumIsInteger)
 {
   double value = AS_NUM(args[0]);
   if (isnan(value) || isinf(value)) RETURN_FALSE;
   RETURN_BOOL(trunc(value) == value);
 }
 
-DEF_PRIMITIVE(num_isNan)
+DEF_PRIMITIVE(NumIsNan)
 {
   RETURN_BOOL(isnan(AS_NUM(args[0])));
 }
 
-DEF_PRIMITIVE(num_sign)
+DEF_PRIMITIVE(NumSign)
 {
   double value = AS_NUM(args[0]);
   if (value > 0)
@@ -869,39 +869,39 @@ DEF_PRIMITIVE(num_sign)
   }
 }
 
-DEF_PRIMITIVE(num_toString)
+DEF_PRIMITIVE(NumToString)
 {
   RETURN_VAL(vm->NumToString( AS_NUM(args[0])));
 }
 
-DEF_PRIMITIVE(num_truncate)
+DEF_PRIMITIVE(NumTruncate)
 {
   double integer;
   modf(AS_NUM(args[0]) , &integer);
   RETURN_NUM(integer);
 }
 
-DEF_PRIMITIVE(object_same)
+DEF_PRIMITIVE(ObjectSame)
 {
   RETURN_BOOL(wrenValuesEqual(args[1], args[2]));
 }
 
-DEF_PRIMITIVE(object_not)
+DEF_PRIMITIVE(ObjectNot)
 {
   RETURN_VAL(FALSE_VAL);
 }
 
-DEF_PRIMITIVE(object_eqeq)
+DEF_PRIMITIVE(ObjectEqeq)
 {
   RETURN_BOOL(wrenValuesEqual(args[0], args[1]));
 }
 
-DEF_PRIMITIVE(object_bangeq)
+DEF_PRIMITIVE(ObjectBangeq)
 {
   RETURN_BOOL(!wrenValuesEqual(args[0], args[1]));
 }
 
-DEF_PRIMITIVE(object_is)
+DEF_PRIMITIVE(ObjectIs)
 {
   if (!IS_CLASS(args[1]))
   {
@@ -923,46 +923,46 @@ DEF_PRIMITIVE(object_is)
   RETURN_BOOL(false);
 }
 
-DEF_PRIMITIVE(object_toString)
+DEF_PRIMITIVE(ObjectToString)
 {
   Obj* obj = AS_OBJ(args[0]);
   Value name = OBJ_VAL(obj->classObj->name);
   RETURN_VAL(vm->StringFormat( "instance of @", name));
 }
 
-DEF_PRIMITIVE(object_type)
+DEF_PRIMITIVE(ObjectType)
 {
   RETURN_OBJ(vm->GetClass( args[0]));
 }
 
-DEF_PRIMITIVE(range_from)
+DEF_PRIMITIVE(RangeFrom)
 {
   RETURN_NUM(AS_RANGE(args[0])->from);
 }
 
-DEF_PRIMITIVE(range_to)
+DEF_PRIMITIVE(RangeTo)
 {
   RETURN_NUM(AS_RANGE(args[0])->to);
 }
 
-DEF_PRIMITIVE(range_min)
+DEF_PRIMITIVE(RangeMin)
 {
   ObjRange* range = AS_RANGE(args[0]);
   RETURN_NUM(fmin(range->from, range->to));
 }
 
-DEF_PRIMITIVE(range_max)
+DEF_PRIMITIVE(RangeMax)
 {
   ObjRange* range = AS_RANGE(args[0]);
   RETURN_NUM(fmax(range->from, range->to));
 }
 
-DEF_PRIMITIVE(range_isInclusive)
+DEF_PRIMITIVE(RangeIsInclusive)
 {
   RETURN_BOOL(AS_RANGE(args[0])->isInclusive);
 }
 
-DEF_PRIMITIVE(range_iterate)
+DEF_PRIMITIVE(RangeIterate)
 {
   ObjRange* range = AS_RANGE(args[0]);
 
@@ -993,13 +993,13 @@ DEF_PRIMITIVE(range_iterate)
   RETURN_NUM(iterator);
 }
 
-DEF_PRIMITIVE(range_iteratorValue)
+DEF_PRIMITIVE(RangeIteratorValue)
 {
   // Assume the iterator is a number so that is the value of the range.
   RETURN_VAL(args[1]);
 }
 
-DEF_PRIMITIVE(range_toString)
+DEF_PRIMITIVE(RangeToString)
 {
   ObjRange* range = AS_RANGE(args[0]);
 
@@ -1017,7 +1017,7 @@ DEF_PRIMITIVE(range_toString)
   RETURN_VAL(result);
 }
 
-DEF_PRIMITIVE(string_fromCodePoint)
+DEF_PRIMITIVE(StringFromCodePoint)
 {
   if (!validateInt(vm, args[1], "Code point")) return false;
 
@@ -1034,7 +1034,7 @@ DEF_PRIMITIVE(string_fromCodePoint)
   RETURN_VAL(vm->StringFromCodePoint( codePoint));
 }
 
-DEF_PRIMITIVE(string_fromByte)
+DEF_PRIMITIVE(StringFromByte)
 {
   if (!validateInt(vm, args[1], "Byte")) return false;
   int byte = (int) AS_NUM(args[1]);
@@ -1049,7 +1049,7 @@ DEF_PRIMITIVE(string_fromByte)
   RETURN_VAL(vm->StringFromByte( (uint8_t) byte));
 }
 
-DEF_PRIMITIVE(string_byteAt)
+DEF_PRIMITIVE(StringByteAt)
 {
   ObjString* string = AS_STRING(args[0]);
 
@@ -1059,12 +1059,12 @@ DEF_PRIMITIVE(string_byteAt)
   RETURN_NUM((uint8_t)string->value[index]);
 }
 
-DEF_PRIMITIVE(string_byteCount)
+DEF_PRIMITIVE(StringByteCount)
 {
   RETURN_NUM(AS_STRING(args[0])->length);
 }
 
-DEF_PRIMITIVE(string_codePointAt)
+DEF_PRIMITIVE(StringCodePointAt)
 {
   ObjString* string = AS_STRING(args[0]);
 
@@ -1080,7 +1080,7 @@ DEF_PRIMITIVE(string_codePointAt)
                             string->length - index));
 }
 
-DEF_PRIMITIVE(string_contains)
+DEF_PRIMITIVE(StringContains)
 {
   if (!validateString(vm, args[1], "Argument")) return false;
 
@@ -1090,7 +1090,7 @@ DEF_PRIMITIVE(string_contains)
   RETURN_BOOL(wrenStringFind(string, search, 0) != UINT32_MAX);
 }
 
-DEF_PRIMITIVE(string_endsWith)
+DEF_PRIMITIVE(StringEndsWith)
 {
   if (!validateString(vm, args[1], "Argument")) return false;
 
@@ -1104,7 +1104,7 @@ DEF_PRIMITIVE(string_endsWith)
                      search->value, search->length) == 0);
 }
 
-DEF_PRIMITIVE(string_indexOf1)
+DEF_PRIMITIVE(StringIndexOf1)
 {
   if (!validateString(vm, args[1], "Argument")) return false;
 
@@ -1115,7 +1115,7 @@ DEF_PRIMITIVE(string_indexOf1)
   RETURN_NUM(index == UINT32_MAX ? -1 : (int)index);
 }
 
-DEF_PRIMITIVE(string_indexOf2)
+DEF_PRIMITIVE(StringIndexOf2)
 {
   if (!validateString(vm, args[1], "Argument")) return false;
 
@@ -1128,7 +1128,7 @@ DEF_PRIMITIVE(string_indexOf2)
   RETURN_NUM(index == UINT32_MAX ? -1 : (int)index);
 }
 
-DEF_PRIMITIVE(string_iterate)
+DEF_PRIMITIVE(StringIterate)
 {
   ObjString* string = AS_STRING(args[0]);
 
@@ -1154,7 +1154,7 @@ DEF_PRIMITIVE(string_iterate)
   RETURN_NUM(index);
 }
 
-DEF_PRIMITIVE(string_iterateByte)
+DEF_PRIMITIVE(StringIterateByte)
 {
   ObjString* string = AS_STRING(args[0]);
 
@@ -1177,7 +1177,7 @@ DEF_PRIMITIVE(string_iterateByte)
   RETURN_NUM(index);
 }
 
-DEF_PRIMITIVE(string_iteratorValue)
+DEF_PRIMITIVE(StringIteratorValue)
 {
   ObjString* string = AS_STRING(args[0]);
   uint32_t index = validateIndex(vm, args[1], string->length, "Iterator");
@@ -1186,7 +1186,7 @@ DEF_PRIMITIVE(string_iteratorValue)
   RETURN_VAL(vm->StringCodePointAt( string, index));
 }
 
-DEF_PRIMITIVE(string_startsWith)
+DEF_PRIMITIVE(StringStartsWith)
 {
   if (!validateString(vm, args[1], "Argument")) return false;
 
@@ -1199,13 +1199,13 @@ DEF_PRIMITIVE(string_startsWith)
   RETURN_BOOL(memcmp(string->value, search->value, search->length) == 0);
 }
 
-DEF_PRIMITIVE(string_plus)
+DEF_PRIMITIVE(StringPlus)
 {
   if (!validateString(vm, args[1], "Right operand")) return false;
   RETURN_VAL(vm->StringFormat( "@@", args[0], args[1]));
 }
 
-DEF_PRIMITIVE(string_subscript)
+DEF_PRIMITIVE(StringSubscript)
 {
   ObjString* string = AS_STRING(args[0]);
 
@@ -1230,23 +1230,23 @@ DEF_PRIMITIVE(string_subscript)
   RETURN_VAL(vm->NewStringFromRange( string, start, count, step));
 }
 
-DEF_PRIMITIVE(string_toString)
+DEF_PRIMITIVE(StringToString)
 {
   RETURN_VAL(args[0]);
 }
 
-DEF_PRIMITIVE(system_clock)
+DEF_PRIMITIVE(SystemClock)
 {
   RETURN_NUM((double)clock() / CLOCKS_PER_SEC);
 }
 
-DEF_PRIMITIVE(system_gc)
+DEF_PRIMITIVE(SystemGc)
 {
   wrenCollectGarbage(vm);
   RETURN_NULL;
 }
 
-DEF_PRIMITIVE(system_writeString)
+DEF_PRIMITIVE(SystemWriteString)
 {
   vm->Write(AS_CSTRING(args[1]));
 
@@ -1283,20 +1283,20 @@ void WrenVM::InitializeCore()
   // Define the root Object class. This has to be done a little specially
   // because it has no superclass.
   this->objectClass = this->DefineClass(coreModule, "Object");
-  PRIMITIVE(this->objectClass, "!", object_not);
-  PRIMITIVE(this->objectClass, "==(_)", object_eqeq);
-  PRIMITIVE(this->objectClass, "!=(_)", object_bangeq);
-  PRIMITIVE(this->objectClass, "is(_)", object_is);
-  PRIMITIVE(this->objectClass, "toString", object_toString);
-  PRIMITIVE(this->objectClass, "type", object_type);
+  PRIMITIVE(this->objectClass, "!", ObjectNot);
+  PRIMITIVE(this->objectClass, "==(_)", ObjectEqeq);
+  PRIMITIVE(this->objectClass, "!=(_)", ObjectBangeq);
+  PRIMITIVE(this->objectClass, "is(_)", ObjectIs);
+  PRIMITIVE(this->objectClass, "toString", ObjectToString);
+  PRIMITIVE(this->objectClass, "type", ObjectType);
 
   // Now we can define Class, which is a subclass of Object.
   this->classClass = this->DefineClass(coreModule, "Class");
   this->BindSuperclass( this->classClass, this->objectClass);
-  PRIMITIVE(this->classClass, "name", class_name);
-  PRIMITIVE(this->classClass, "supertype", class_supertype);
-  PRIMITIVE(this->classClass, "toString", class_toString);
-  PRIMITIVE(this->classClass, "attributes", class_attributes);
+  PRIMITIVE(this->classClass, "name", ClassName);
+  PRIMITIVE(this->classClass, "supertype", ClassSupertype);
+  PRIMITIVE(this->classClass, "toString", ClassToString);
+  PRIMITIVE(this->classClass, "attributes", ClassAttributes);
 
   // Finally, we can define Object's metaclass which is a subclass of Class.
   ObjClass* objectMetaclass = this->DefineClass(coreModule, "Object metaclass");
@@ -1310,7 +1310,7 @@ void WrenVM::InitializeCore()
   // collected.
   this->BindSuperclass( objectMetaclass, this->classClass);
 
-  PRIMITIVE(objectMetaclass, "same(_,_)", object_same);
+  PRIMITIVE(objectMetaclass, "same(_,_)", ObjectSame);
 
   // The core class diagram ends up looking like this, where single lines point
   // to a class's superclass, and double lines point to its metaclass:
@@ -1338,177 +1338,177 @@ void WrenVM::InitializeCore()
   wrenInterpret(this, nullptr, coreModuleSource);
 
   this->boolClass = AS_CLASS(this->FindVariable( coreModule, "Bool"));
-  PRIMITIVE(this->boolClass, "toString", bool_toString);
-  PRIMITIVE(this->boolClass, "!", bool_not);
+  PRIMITIVE(this->boolClass, "toString", BoolToString);
+  PRIMITIVE(this->boolClass, "!", BoolNot);
 
   this->fiberClass = AS_CLASS(this->FindVariable( coreModule, "Fiber"));
-  PRIMITIVE(this->fiberClass->classObj, "new(_)", fiber_new);
-  PRIMITIVE(this->fiberClass->classObj, "abort(_)", fiber_abort);
-  PRIMITIVE(this->fiberClass->classObj, "exit(_)", fiber_exit);
-  PRIMITIVE(this->fiberClass->classObj, "current", fiber_current);
-  PRIMITIVE(this->fiberClass->classObj, "suspend()", fiber_suspend);
-  PRIMITIVE(this->fiberClass->classObj, "yield()", fiber_yield);
-  PRIMITIVE(this->fiberClass->classObj, "yield(_)", fiber_yield1);
-  PRIMITIVE(this->fiberClass, "call()", fiber_call);
-  PRIMITIVE(this->fiberClass, "call(_)", fiber_call1);
-  PRIMITIVE(this->fiberClass, "error", fiber_error);
-  PRIMITIVE(this->fiberClass, "isDone", fiber_isDone);
-  PRIMITIVE(this->fiberClass, "transfer()", fiber_transfer);
-  PRIMITIVE(this->fiberClass, "transfer(_)", fiber_transfer1);
-  PRIMITIVE(this->fiberClass, "transferError(_)", fiber_transferError);
-  PRIMITIVE(this->fiberClass, "try()", fiber_try);
-  PRIMITIVE(this->fiberClass, "try(_)", fiber_try1);
+  PRIMITIVE(this->fiberClass->classObj, "new(_)", FiberNew);
+  PRIMITIVE(this->fiberClass->classObj, "abort(_)", FiberAbort);
+  PRIMITIVE(this->fiberClass->classObj, "exit(_)", FiberExit);
+  PRIMITIVE(this->fiberClass->classObj, "current", FiberCurrent);
+  PRIMITIVE(this->fiberClass->classObj, "suspend()", FiberSuspend);
+  PRIMITIVE(this->fiberClass->classObj, "yield()", FiberYield);
+  PRIMITIVE(this->fiberClass->classObj, "yield(_)", FiberYield1);
+  PRIMITIVE(this->fiberClass, "call()", FiberCall);
+  PRIMITIVE(this->fiberClass, "call(_)", FiberCall1);
+  PRIMITIVE(this->fiberClass, "error", FiberError);
+  PRIMITIVE(this->fiberClass, "isDone", FiberIsDone);
+  PRIMITIVE(this->fiberClass, "transfer()", FiberTransfer);
+  PRIMITIVE(this->fiberClass, "transfer(_)", FiberTransfer1);
+  PRIMITIVE(this->fiberClass, "transferError(_)", FiberTransferError);
+  PRIMITIVE(this->fiberClass, "try()", FiberTry);
+  PRIMITIVE(this->fiberClass, "try(_)", FiberTry1);
 
   this->fnClass = AS_CLASS(this->FindVariable( coreModule, "Fn"));
-  PRIMITIVE(this->fnClass->classObj, "new(_)", fn_new);
+  PRIMITIVE(this->fnClass->classObj, "new(_)", FnNew);
 
-  PRIMITIVE(this->fnClass, "arity", fn_arity);
+  PRIMITIVE(this->fnClass, "arity", FnArity);
 
-  FUNCTION_CALL(this->fnClass, "call()", fn_call0);
-  FUNCTION_CALL(this->fnClass, "call(_)", fn_call1);
-  FUNCTION_CALL(this->fnClass, "call(_,_)", fn_call2);
-  FUNCTION_CALL(this->fnClass, "call(_,_,_)", fn_call3);
-  FUNCTION_CALL(this->fnClass, "call(_,_,_,_)", fn_call4);
-  FUNCTION_CALL(this->fnClass, "call(_,_,_,_,_)", fn_call5);
-  FUNCTION_CALL(this->fnClass, "call(_,_,_,_,_,_)", fn_call6);
-  FUNCTION_CALL(this->fnClass, "call(_,_,_,_,_,_,_)", fn_call7);
-  FUNCTION_CALL(this->fnClass, "call(_,_,_,_,_,_,_,_)", fn_call8);
-  FUNCTION_CALL(this->fnClass, "call(_,_,_,_,_,_,_,_,_)", fn_call9);
-  FUNCTION_CALL(this->fnClass, "call(_,_,_,_,_,_,_,_,_,_)", fn_call10);
-  FUNCTION_CALL(this->fnClass, "call(_,_,_,_,_,_,_,_,_,_,_)", fn_call11);
-  FUNCTION_CALL(this->fnClass, "call(_,_,_,_,_,_,_,_,_,_,_,_)", fn_call12);
-  FUNCTION_CALL(this->fnClass, "call(_,_,_,_,_,_,_,_,_,_,_,_,_)", fn_call13);
-  FUNCTION_CALL(this->fnClass, "call(_,_,_,_,_,_,_,_,_,_,_,_,_,_)", fn_call14);
-  FUNCTION_CALL(this->fnClass, "call(_,_,_,_,_,_,_,_,_,_,_,_,_,_,_)", fn_call15);
-  FUNCTION_CALL(this->fnClass, "call(_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_)", fn_call16);
+  FUNCTION_CALL(this->fnClass, "call()", FnCall0);
+  FUNCTION_CALL(this->fnClass, "call(_)", FnCall1);
+  FUNCTION_CALL(this->fnClass, "call(_,_)", FnCall2);
+  FUNCTION_CALL(this->fnClass, "call(_,_,_)", FnCall3);
+  FUNCTION_CALL(this->fnClass, "call(_,_,_,_)", FnCall4);
+  FUNCTION_CALL(this->fnClass, "call(_,_,_,_,_)", FnCall5);
+  FUNCTION_CALL(this->fnClass, "call(_,_,_,_,_,_)", FnCall6);
+  FUNCTION_CALL(this->fnClass, "call(_,_,_,_,_,_,_)", FnCall7);
+  FUNCTION_CALL(this->fnClass, "call(_,_,_,_,_,_,_,_)", FnCall8);
+  FUNCTION_CALL(this->fnClass, "call(_,_,_,_,_,_,_,_,_)", FnCall9);
+  FUNCTION_CALL(this->fnClass, "call(_,_,_,_,_,_,_,_,_,_)", FnCall10);
+  FUNCTION_CALL(this->fnClass, "call(_,_,_,_,_,_,_,_,_,_,_)", FnCall11);
+  FUNCTION_CALL(this->fnClass, "call(_,_,_,_,_,_,_,_,_,_,_,_)", FnCall12);
+  FUNCTION_CALL(this->fnClass, "call(_,_,_,_,_,_,_,_,_,_,_,_,_)", FnCall13);
+  FUNCTION_CALL(this->fnClass, "call(_,_,_,_,_,_,_,_,_,_,_,_,_,_)", FnCall14);
+  FUNCTION_CALL(this->fnClass, "call(_,_,_,_,_,_,_,_,_,_,_,_,_,_,_)", FnCall15);
+  FUNCTION_CALL(this->fnClass, "call(_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_)", FnCall16);
   
-  PRIMITIVE(this->fnClass, "toString", fn_toString);
+  PRIMITIVE(this->fnClass, "toString", FnToString);
 
   this->nullClass = AS_CLASS(this->FindVariable( coreModule, "Null"));
-  PRIMITIVE(this->nullClass, "!", null_not);
-  PRIMITIVE(this->nullClass, "toString", null_toString);
+  PRIMITIVE(this->nullClass, "!", NullNot);
+  PRIMITIVE(this->nullClass, "toString", NullToString);
 
   this->numClass = AS_CLASS(this->FindVariable( coreModule, "Num"));
-  PRIMITIVE(this->numClass->classObj, "fromString(_)", num_fromString);
-  PRIMITIVE(this->numClass->classObj, "infinity", num_infinity);
-  PRIMITIVE(this->numClass->classObj, "nan", num_nan);
-  PRIMITIVE(this->numClass->classObj, "pi", num_pi);
-  PRIMITIVE(this->numClass->classObj, "tau", num_tau);
-  PRIMITIVE(this->numClass->classObj, "largest", num_largest);
-  PRIMITIVE(this->numClass->classObj, "smallest", num_smallest);
-  PRIMITIVE(this->numClass->classObj, "maxSafeInteger", num_maxSafeInteger);
-  PRIMITIVE(this->numClass->classObj, "minSafeInteger", num_minSafeInteger);
-  PRIMITIVE(this->numClass, "-(_)", num_minus);
-  PRIMITIVE(this->numClass, "+(_)", num_plus);
-  PRIMITIVE(this->numClass, "*(_)", num_multiply);
-  PRIMITIVE(this->numClass, "/(_)", num_divide);
-  PRIMITIVE(this->numClass, "<(_)", num_lt);
-  PRIMITIVE(this->numClass, ">(_)", num_gt);
-  PRIMITIVE(this->numClass, "<=(_)", num_lte);
-  PRIMITIVE(this->numClass, ">=(_)", num_gte);
-  PRIMITIVE(this->numClass, "&(_)", num_bitwiseAnd);
-  PRIMITIVE(this->numClass, "|(_)", num_bitwiseOr);
-  PRIMITIVE(this->numClass, "^(_)", num_bitwiseXor);
-  PRIMITIVE(this->numClass, "<<(_)", num_bitwiseLeftShift);
-  PRIMITIVE(this->numClass, ">>(_)", num_bitwiseRightShift);
-  PRIMITIVE(this->numClass, "abs", num_abs);
-  PRIMITIVE(this->numClass, "acos", num_acos);
-  PRIMITIVE(this->numClass, "asin", num_asin);
-  PRIMITIVE(this->numClass, "atan", num_atan);
-  PRIMITIVE(this->numClass, "cbrt", num_cbrt);
-  PRIMITIVE(this->numClass, "ceil", num_ceil);
-  PRIMITIVE(this->numClass, "cos", num_cos);
-  PRIMITIVE(this->numClass, "floor", num_floor);
-  PRIMITIVE(this->numClass, "-", num_negate);
-  PRIMITIVE(this->numClass, "round", num_round);
-  PRIMITIVE(this->numClass, "min(_)", num_min);
-  PRIMITIVE(this->numClass, "max(_)", num_max);
-  PRIMITIVE(this->numClass, "clamp(_,_)", num_clamp);
-  PRIMITIVE(this->numClass, "sin", num_sin);
-  PRIMITIVE(this->numClass, "sqrt", num_sqrt);
-  PRIMITIVE(this->numClass, "tan", num_tan);
-  PRIMITIVE(this->numClass, "log", num_log);
-  PRIMITIVE(this->numClass, "log2", num_log2);
-  PRIMITIVE(this->numClass, "exp", num_exp);
-  PRIMITIVE(this->numClass, "%(_)", num_mod);
-  PRIMITIVE(this->numClass, "~", num_bitwiseNot);
-  PRIMITIVE(this->numClass, "..(_)", num_dotDot);
-  PRIMITIVE(this->numClass, "...(_)", num_dotDotDot);
-  PRIMITIVE(this->numClass, "atan(_)", num_atan2);
-  PRIMITIVE(this->numClass, "pow(_)", num_pow);
-  PRIMITIVE(this->numClass, "fraction", num_fraction);
-  PRIMITIVE(this->numClass, "isInfinity", num_isInfinity);
-  PRIMITIVE(this->numClass, "isInteger", num_isInteger);
-  PRIMITIVE(this->numClass, "isNan", num_isNan);
-  PRIMITIVE(this->numClass, "sign", num_sign);
-  PRIMITIVE(this->numClass, "toString", num_toString);
-  PRIMITIVE(this->numClass, "truncate", num_truncate);
+  PRIMITIVE(this->numClass->classObj, "fromString(_)", NumFromString);
+  PRIMITIVE(this->numClass->classObj, "infinity", NumInfinity);
+  PRIMITIVE(this->numClass->classObj, "nan", NumNan);
+  PRIMITIVE(this->numClass->classObj, "pi", NumPi);
+  PRIMITIVE(this->numClass->classObj, "tau", NumTau);
+  PRIMITIVE(this->numClass->classObj, "largest", NumLargest);
+  PRIMITIVE(this->numClass->classObj, "smallest", NumSmallest);
+  PRIMITIVE(this->numClass->classObj, "maxSafeInteger", NumMaxSafeInteger);
+  PRIMITIVE(this->numClass->classObj, "minSafeInteger", NumMinSafeInteger);
+  PRIMITIVE(this->numClass, "-(_)", NumMinus);
+  PRIMITIVE(this->numClass, "+(_)", NumPlus);
+  PRIMITIVE(this->numClass, "*(_)", NumMultiply);
+  PRIMITIVE(this->numClass, "/(_)", NumDivide);
+  PRIMITIVE(this->numClass, "<(_)", NumLt);
+  PRIMITIVE(this->numClass, ">(_)", NumGt);
+  PRIMITIVE(this->numClass, "<=(_)", NumLte);
+  PRIMITIVE(this->numClass, ">=(_)", NumGte);
+  PRIMITIVE(this->numClass, "&(_)", NumBitwiseAnd);
+  PRIMITIVE(this->numClass, "|(_)", NumBitwiseOr);
+  PRIMITIVE(this->numClass, "^(_)", NumBitwiseXor);
+  PRIMITIVE(this->numClass, "<<(_)", NumBitwiseLeftShift);
+  PRIMITIVE(this->numClass, ">>(_)", NumBitwiseRightShift);
+  PRIMITIVE(this->numClass, "abs", NumAbs);
+  PRIMITIVE(this->numClass, "acos", NumAcos);
+  PRIMITIVE(this->numClass, "asin", NumAsin);
+  PRIMITIVE(this->numClass, "atan", NumAtan);
+  PRIMITIVE(this->numClass, "cbrt", NumCbrt);
+  PRIMITIVE(this->numClass, "ceil", NumCeil);
+  PRIMITIVE(this->numClass, "cos", NumCos);
+  PRIMITIVE(this->numClass, "floor", NumFloor);
+  PRIMITIVE(this->numClass, "-", NumNegate);
+  PRIMITIVE(this->numClass, "round", NumRound);
+  PRIMITIVE(this->numClass, "min(_)", NumMin);
+  PRIMITIVE(this->numClass, "max(_)", NumMax);
+  PRIMITIVE(this->numClass, "clamp(_,_)", NumClamp);
+  PRIMITIVE(this->numClass, "sin", NumSin);
+  PRIMITIVE(this->numClass, "sqrt", NumSqrt);
+  PRIMITIVE(this->numClass, "tan", NumTan);
+  PRIMITIVE(this->numClass, "log", NumLog);
+  PRIMITIVE(this->numClass, "log2", NumLog2);
+  PRIMITIVE(this->numClass, "exp", NumExp);
+  PRIMITIVE(this->numClass, "%(_)", NumMod);
+  PRIMITIVE(this->numClass, "~", NumBitwiseNot);
+  PRIMITIVE(this->numClass, "..(_)", NumDotDot);
+  PRIMITIVE(this->numClass, "...(_)", NumDotDotDot);
+  PRIMITIVE(this->numClass, "atan(_)", NumAtan2);
+  PRIMITIVE(this->numClass, "pow(_)", NumPow);
+  PRIMITIVE(this->numClass, "fraction", NumFraction);
+  PRIMITIVE(this->numClass, "isInfinity", NumIsInfinity);
+  PRIMITIVE(this->numClass, "isInteger", NumIsInteger);
+  PRIMITIVE(this->numClass, "isNan", NumIsNan);
+  PRIMITIVE(this->numClass, "sign", NumSign);
+  PRIMITIVE(this->numClass, "toString", NumToString);
+  PRIMITIVE(this->numClass, "truncate", NumTruncate);
 
   // These are defined just so that 0 and -0 are equal, which is specified by
   // IEEE 754 even though they have different bit representations.
-  PRIMITIVE(this->numClass, "==(_)", num_eqeq);
-  PRIMITIVE(this->numClass, "!=(_)", num_bangeq);
+  PRIMITIVE(this->numClass, "==(_)", NumEqeq);
+  PRIMITIVE(this->numClass, "!=(_)", NumBangeq);
 
   this->stringClass = AS_CLASS(this->FindVariable( coreModule, "String"));
-  PRIMITIVE(this->stringClass->classObj, "fromCodePoint(_)", string_fromCodePoint);
-  PRIMITIVE(this->stringClass->classObj, "fromByte(_)", string_fromByte);
-  PRIMITIVE(this->stringClass, "+(_)", string_plus);
-  PRIMITIVE(this->stringClass, "[_]", string_subscript);
-  PRIMITIVE(this->stringClass, "byteAt_(_)", string_byteAt);
-  PRIMITIVE(this->stringClass, "byteCount_", string_byteCount);
-  PRIMITIVE(this->stringClass, "codePointAt_(_)", string_codePointAt);
-  PRIMITIVE(this->stringClass, "contains(_)", string_contains);
-  PRIMITIVE(this->stringClass, "endsWith(_)", string_endsWith);
-  PRIMITIVE(this->stringClass, "indexOf(_)", string_indexOf1);
-  PRIMITIVE(this->stringClass, "indexOf(_,_)", string_indexOf2);
-  PRIMITIVE(this->stringClass, "iterate(_)", string_iterate);
-  PRIMITIVE(this->stringClass, "iterateByte_(_)", string_iterateByte);
-  PRIMITIVE(this->stringClass, "iteratorValue(_)", string_iteratorValue);
-  PRIMITIVE(this->stringClass, "startsWith(_)", string_startsWith);
-  PRIMITIVE(this->stringClass, "toString", string_toString);
+  PRIMITIVE(this->stringClass->classObj, "fromCodePoint(_)", StringFromCodePoint);
+  PRIMITIVE(this->stringClass->classObj, "fromByte(_)", StringFromByte);
+  PRIMITIVE(this->stringClass, "+(_)", StringPlus);
+  PRIMITIVE(this->stringClass, "[_]", StringSubscript);
+  PRIMITIVE(this->stringClass, "byteAt_(_)", StringByteAt);
+  PRIMITIVE(this->stringClass, "byteCount_", StringByteCount);
+  PRIMITIVE(this->stringClass, "codePointAt_(_)", StringCodePointAt);
+  PRIMITIVE(this->stringClass, "contains(_)", StringContains);
+  PRIMITIVE(this->stringClass, "endsWith(_)", StringEndsWith);
+  PRIMITIVE(this->stringClass, "indexOf(_)", StringIndexOf1);
+  PRIMITIVE(this->stringClass, "indexOf(_,_)", StringIndexOf2);
+  PRIMITIVE(this->stringClass, "iterate(_)", StringIterate);
+  PRIMITIVE(this->stringClass, "iterateByte_(_)", StringIterateByte);
+  PRIMITIVE(this->stringClass, "iteratorValue(_)", StringIteratorValue);
+  PRIMITIVE(this->stringClass, "startsWith(_)", StringStartsWith);
+  PRIMITIVE(this->stringClass, "toString", StringToString);
 
   this->listClass = AS_CLASS(this->FindVariable( coreModule, "List"));
-  PRIMITIVE(this->listClass->classObj, "filled(_,_)", list_filled);
-  PRIMITIVE(this->listClass->classObj, "new()", list_new);
-  PRIMITIVE(this->listClass, "[_]", list_subscript);
-  PRIMITIVE(this->listClass, "[_]=(_)", list_subscriptSetter);
-  PRIMITIVE(this->listClass, "add(_)", list_add);
-  PRIMITIVE(this->listClass, "addCore_(_)", list_addCore);
-  PRIMITIVE(this->listClass, "clear()", list_clear);
-  PRIMITIVE(this->listClass, "count", list_count);
-  PRIMITIVE(this->listClass, "insert(_,_)", list_insert);
-  PRIMITIVE(this->listClass, "iterate(_)", list_iterate);
-  PRIMITIVE(this->listClass, "iteratorValue(_)", list_iteratorValue);
-  PRIMITIVE(this->listClass, "removeAt(_)", list_removeAt);
-  PRIMITIVE(this->listClass, "swap(_,_)", list_swap);
+  PRIMITIVE(this->listClass->classObj, "filled(_,_)", ListFilled);
+  PRIMITIVE(this->listClass->classObj, "new()", ListNew);
+  PRIMITIVE(this->listClass, "[_]", ListSubscript);
+  PRIMITIVE(this->listClass, "[_]=(_)", ListSubscriptSetter);
+  PRIMITIVE(this->listClass, "add(_)", ListAdd);
+  PRIMITIVE(this->listClass, "addCore_(_)", ListAddCore);
+  PRIMITIVE(this->listClass, "clear()", ListClear);
+  PRIMITIVE(this->listClass, "count", ListCount);
+  PRIMITIVE(this->listClass, "insert(_,_)", ListInsert);
+  PRIMITIVE(this->listClass, "iterate(_)", ListIterate);
+  PRIMITIVE(this->listClass, "iteratorValue(_)", ListIteratorValue);
+  PRIMITIVE(this->listClass, "removeAt(_)", ListRemoveAt);
+  PRIMITIVE(this->listClass, "swap(_,_)", ListSwap);
 
   this->mapClass = AS_CLASS(this->FindVariable( coreModule, "Map"));
-  PRIMITIVE(this->mapClass->classObj, "new()", map_new);
-  PRIMITIVE(this->mapClass, "[_]", map_subscript);
-  PRIMITIVE(this->mapClass, "[_]=(_)", map_subscriptSetter);
-  PRIMITIVE(this->mapClass, "addCore_(_,_)", map_addCore);
-  PRIMITIVE(this->mapClass, "clear()", map_clear);
-  PRIMITIVE(this->mapClass, "containsKey(_)", map_containsKey);
-  PRIMITIVE(this->mapClass, "count", map_count);
-  PRIMITIVE(this->mapClass, "remove(_)", map_remove);
-  PRIMITIVE(this->mapClass, "iterate(_)", map_iterate);
-  PRIMITIVE(this->mapClass, "keyIteratorValue_(_)", map_keyIteratorValue);
-  PRIMITIVE(this->mapClass, "valueIteratorValue_(_)", map_valueIteratorValue);
+  PRIMITIVE(this->mapClass->classObj, "new()", MapNew);
+  PRIMITIVE(this->mapClass, "[_]", MapSubscript);
+  PRIMITIVE(this->mapClass, "[_]=(_)", MapSubscriptSetter);
+  PRIMITIVE(this->mapClass, "addCore_(_,_)", MapAddCore);
+  PRIMITIVE(this->mapClass, "clear()", MapClear);
+  PRIMITIVE(this->mapClass, "containsKey(_)", MapContainsKey);
+  PRIMITIVE(this->mapClass, "count", MapCount);
+  PRIMITIVE(this->mapClass, "remove(_)", MapRemove);
+  PRIMITIVE(this->mapClass, "iterate(_)", MapIterate);
+  PRIMITIVE(this->mapClass, "keyIteratorValue_(_)", MapKeyIteratorValue);
+  PRIMITIVE(this->mapClass, "valueIteratorValue_(_)", MapValueIteratorValue);
 
   this->rangeClass = AS_CLASS(this->FindVariable( coreModule, "Range"));
-  PRIMITIVE(this->rangeClass, "from", range_from);
-  PRIMITIVE(this->rangeClass, "to", range_to);
-  PRIMITIVE(this->rangeClass, "min", range_min);
-  PRIMITIVE(this->rangeClass, "max", range_max);
-  PRIMITIVE(this->rangeClass, "isInclusive", range_isInclusive);
-  PRIMITIVE(this->rangeClass, "iterate(_)", range_iterate);
-  PRIMITIVE(this->rangeClass, "iteratorValue(_)", range_iteratorValue);
-  PRIMITIVE(this->rangeClass, "toString", range_toString);
+  PRIMITIVE(this->rangeClass, "from", RangeFrom);
+  PRIMITIVE(this->rangeClass, "to", RangeTo);
+  PRIMITIVE(this->rangeClass, "min", RangeMin);
+  PRIMITIVE(this->rangeClass, "max", RangeMax);
+  PRIMITIVE(this->rangeClass, "isInclusive", RangeIsInclusive);
+  PRIMITIVE(this->rangeClass, "iterate(_)", RangeIterate);
+  PRIMITIVE(this->rangeClass, "iteratorValue(_)", RangeIteratorValue);
+  PRIMITIVE(this->rangeClass, "toString", RangeToString);
 
   ObjClass* systemClass = AS_CLASS(this->FindVariable( coreModule, "System"));
-  PRIMITIVE(systemClass->classObj, "clock", system_clock);
-  PRIMITIVE(systemClass->classObj, "gc()", system_gc);
-  PRIMITIVE(systemClass->classObj, "writeString_(_)", system_writeString);
+  PRIMITIVE(systemClass->classObj, "clock", SystemClock);
+  PRIMITIVE(systemClass->classObj, "gc()", SystemGc);
+  PRIMITIVE(systemClass->classObj, "writeString_(_)", SystemWriteString);
 
   // While bootstrapping the core types and running the core module, a number
   // of string objects have been created, many of which were instantiated
