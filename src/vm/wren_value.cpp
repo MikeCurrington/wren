@@ -1213,7 +1213,7 @@ void WrenVM::FreeObj(Obj* obj)
       break;
 
     case OBJ_MODULE:
-      ((ObjModule*)obj)->variableNames.clear(this);
+      ((ObjModule*)obj)->variableNames.clear();
       ((ObjModule*)obj)->variables = {};
       break;
 

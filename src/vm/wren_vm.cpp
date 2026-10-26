@@ -98,7 +98,7 @@ WrenVM::~WrenVM()
   // Likewise, all nested calls must have been ended before the VM is freed.
   ASSERT(callContexts == nullptr, "All nested calls have not been ended.");
 
-  methodNames.clear(this);
+  methodNames.clear();
 
   ClearClassFields();
 }
