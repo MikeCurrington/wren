@@ -3652,7 +3652,7 @@ static void classDefinition(Compiler* compiler, bool isForeign)
   // Remember the field names for the debugger.
   if (!isForeign && classInfo.fields.count() > 0)
   {
-    wrenDebugRecordClassFields(compiler->parser->vm, className->value,
+    compiler->parser->vm->RecordClassFields(className->value,
                                &classInfo.fields);
   }
 
@@ -3795,14 +3795,14 @@ void definition(Compiler* compiler)
   }
 }
 
-ObjFn* wrenCompile(WrenVM* vm, ObjModule* module, const char* source,
+ObjFn* WrenVM::Compile(ObjModule* module, const char* source,
                    bool isExpression, bool printErrors)
 {
   // Skip the UTF-8 BOM if there is one.
   if (strncmp(source, "\xEF\xBB\xBF", 3) == 0) source += 3;
   
   Parser parser;
-  parser.vm = vm;
+  parser.vm = this;
   parser.module = module;
   parser.source = source;
 
@@ -3937,31 +3937,31 @@ void wrenBindMethodCode(ObjClass* classObj, ObjFn* fn)
   }
 }
 
-void wrenMarkCompiler(WrenVM* vm, Compiler* compiler)
+void WrenVM::MarkCompiler(Compiler* compiler)
 {
-  vm->GrayValue( compiler->parser->current.value);
-  vm->GrayValue( compiler->parser->previous.value);
-  vm->GrayValue( compiler->parser->next.value);
+  this->GrayValue( compiler->parser->current.value);
+  this->GrayValue( compiler->parser->previous.value);
+  this->GrayValue( compiler->parser->next.value);
 
   // Walk up the parent chain to mark the outer compilers too. The VM only
   // tracks the innermost one.
   do
   {
-    vm->GrayObj( (Obj*)compiler->fn);
-    vm->GrayObj( (Obj*)compiler->constants);
-    vm->GrayObj( (Obj*)compiler->attributes);
+    this->GrayObj( (Obj*)compiler->fn);
+    this->GrayObj( (Obj*)compiler->constants);
+    this->GrayObj( (Obj*)compiler->attributes);
     
     if (compiler->enclosingClass != nullptr)
     {
-      compiler->enclosingClass->fields.blacken(vm);
+      compiler->enclosingClass->fields.blacken(this);
 
       if(compiler->enclosingClass->methodAttributes != nullptr) 
       {
-        vm->GrayObj( (Obj*)compiler->enclosingClass->methodAttributes);
+        this->GrayObj( (Obj*)compiler->enclosingClass->methodAttributes);
       }
       if(compiler->enclosingClass->classAttributes != nullptr) 
       {
-        vm->GrayObj( (Obj*)compiler->enclosingClass->classAttributes);
+        this->GrayObj( (Obj*)compiler->enclosingClass->classAttributes);
       }
     }
     

@@ -340,6 +340,34 @@ public:
   void BlackenObjects();
   void FreeObj(Obj* obj);
 
+  // Core library bootstrap (wren_core.cpp). Must run once in the constructor
+  // before any code executes.
+  void InitializeCore();
+
+  // Resumes [fiber], as invoked by the fiber primitives in wren_core.cpp.
+  bool RunFiber(ObjFiber* fiber, Value* args, bool isCall, bool hasValue,
+                const char* verb);
+
+  // Invokes [closure] (which must be a plain function) with [numArgs]
+  // arguments, from the fn.call primitives in wren_core.cpp.
+  void CallFn(Value* args, int numArgs);
+
+  // Compiles [source] in [module] and returns the function, or NULL on a
+  // compile error (wren_compiler.cpp).
+  ObjFn* Compile(ObjModule* module, const char* source, bool isExpression,
+                 bool printErrors);
+
+  // Marks any objects the compiler is using as GC roots (wren_compiler.cpp).
+  void MarkCompiler(Compiler* compiler);
+
+  // Debug support (wren_debug.cpp).
+  void PrintStackTrace();
+  void DumpCode(ObjFn* fn);
+  void VmDebugHook(ObjFiber* fiber, CallFrame* frame);
+  void RecordClassFields(const char* className, const SymbolTable* names);
+  const char* GetFieldName(ObjClass* classObj, int index);
+  void ClearClassFields();
+
   // Invokes the finalizer for [foreign].
   void FinalizeForeign(ObjForeign* foreign);
 
@@ -449,6 +477,15 @@ private:
   void BlackenString(ObjString* string);
   void BlackenUpvalue(ObjUpvalue* upvalue);
   void BlackenObject(Obj* obj);
+
+  // wren_core.cpp internals.
+  ObjClass* DefineClass(ObjModule* module, const char* name);
+
+  // wren_debug.cpp internals.
+  CallFrame* DebugGetFrame(int index, ObjFiber** owner);
+  Value* DebugFrameLocalEnd(ObjFiber* fiber, CallFrame* callFrame);
+  ObjModule* DebugFrameModule(int frame);
+  int DumpInstruction(ObjFn* fn, int i);
 
   // The exported C API functions in wren.h, which forward to the private
   // members above.

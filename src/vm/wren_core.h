@@ -18,6 +18,5 @@
 // behavior. For example, `System.print` should call `toString` on its argument,
 // including user-defined `toString` methods on user-defined classes.
 
-void wrenInitializeCore(WrenVM* vm);
 
 #endif

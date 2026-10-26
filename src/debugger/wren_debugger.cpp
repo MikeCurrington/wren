@@ -799,7 +799,7 @@ namespace debug
           ObjInstance* instance = (ObjInstance*)obj;
           for (int i = 0; i < obj->classObj->numFields; i++)
           {
-            const char* name = wrenDebugGetFieldName(vm_, obj->classObj, i);
+            const char* name = vm_->GetFieldName(obj->classObj, i);
             appendVariable(name != nullptr
                 ? std::string(name)
                 : "field" + std::to_string(i),

@@ -70,7 +70,7 @@ WrenVM::WrenVM(Config config)
   this->nextGC = this->config.initialHeapSize;
 
   this->modules = wrenConstruct<ObjMap>(this, 0);
-  wrenInitializeCore(this);
+  InitializeCore();
 }
 
 WrenVM::~WrenVM()
@@ -100,7 +100,7 @@ WrenVM::~WrenVM()
 
   methodNames.clear(this);
 
-  wrenDebugClearClassFields(this);
+  ClearClassFields();
 }
 
 std::optional<std::string> WrenVM::ResolveModule(std::string_view importer,
@@ -302,7 +302,7 @@ void WrenVM::CollectGarbage()
   }
 
   // Any object the compiler is using (if there is one).
-  if (this->compiler != nullptr) wrenMarkCompiler(this, this->compiler);
+  if (this->compiler != nullptr) MarkCompiler(this->compiler);
 
   // Method names.
   this->methodNames.blacken(this);
@@ -580,7 +580,7 @@ void WrenVM::RuntimeError()
   }
 
   // If we got here, nothing caught the error, so show the stack trace.
-  wrenDebugPrintStackTrace(this);
+  PrintStackTrace();
   this->fiber = nullptr;
   this->apiStack = nullptr;
 }
@@ -633,7 +633,7 @@ ObjClosure* WrenVM::CompileInModule(Value name, const char* source,
     }
   }
 
-  ObjFn* fn = wrenCompile(this, module, source, isExpression, printErrors);
+  ObjFn* fn = Compile(module, source, isExpression, printErrors);
   if (fn == nullptr)
   {
     // TODO: Should we still store the module even if it didn't compile?
@@ -1030,7 +1030,7 @@ WrenInterpretResult WrenVM::RunInterpreter(ObjFiber* fiber)
         do                                                                     \
         {                                                                      \
           wrenDumpStack(fiber);                                                \
-          wrenDumpInstruction(this, fn, (int)(ip - fn->code.data()));              \
+          DumpInstruction(fn, (int)(ip - fn->code.data()));              \
         } while (false)
   #else
     #define DEBUG_TRACE_INSTRUCTIONS() do { } while (false)
@@ -1047,7 +1047,7 @@ WrenInterpretResult WrenVM::RunInterpreter(ObjFiber* fiber)
         if (this->debugHook != nullptr)                                          \
         {                                                                      \
           STORE_FRAME();                                                       \
-          wrenVmDebugHook(this, fiber, frame);                                   \
+          VmDebugHook(fiber, frame);                                   \
           LOAD_FRAME();                                                        \
         }                                                                      \
       } while (false)
