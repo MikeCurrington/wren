@@ -12,7 +12,7 @@
       Method method;                                                           \
       method.type = METHOD_PRIMITIVE;                                          \
       method.as.primitive = prim_##function;                                   \
-      wrenBindMethod(vm, cls, symbol, method);                                 \
+      vm->AddMethod(cls, symbol, method);                                 \
     } while (false)
 
 // Binds a primitive method named [name] (in Wren) implemented using C function
@@ -24,7 +24,7 @@
       Method method;                                                           \
       method.type = METHOD_FUNCTION_CALL;                                      \
       method.as.primitive = prim_##function;                                   \
-      wrenBindMethod(vm, cls, symbol, method);                                 \
+      vm->AddMethod(cls, symbol, method);                                 \
     } while (false)
 
 // Defines a primitive method whose C function name is [name]. This abstracts
@@ -50,14 +50,14 @@
 #define RETURN_ERROR(msg)                                                      \
     do                                                                         \
     {                                                                          \
-      vm->fiber->error = wrenNewStringLength(vm, msg, sizeof(msg) - 1);        \
+      vm->fiber->error = vm->NewStringLength(msg, sizeof(msg) - 1);        \
       return false;                                                            \
     } while (false)
 
 #define RETURN_ERROR_FMT(...)                                                  \
     do                                                                         \
     {                                                                          \
-      vm->fiber->error = wrenStringFormat(vm, __VA_ARGS__);                    \
+      vm->fiber->error = vm->StringFormat(__VA_ARGS__);                    \
       return false;                                                            \
     } while (false)
 

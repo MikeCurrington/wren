@@ -404,7 +404,7 @@ DEF_PRIMITIVE(list_insert)
                                  "Index");
   if (index == UINT32_MAX) return false;
 
-  wrenListInsert(vm, list, args[2], index);
+  vm->ListInsert( list, args[2], index);
   RETURN_VAL(args[2]);
 }
 
@@ -444,7 +444,7 @@ DEF_PRIMITIVE(list_removeAt)
   uint32_t index = validateIndex(vm, args[1], list->elements.size(), "Index");
   if (index == UINT32_MAX) return false;
 
-  RETURN_VAL(wrenListRemoveAt(vm, list, index));
+  RETURN_VAL(vm->ListRemoveAt( list, index));
 }
 
 DEF_PRIMITIVE(list_swap)
@@ -525,7 +525,7 @@ DEF_PRIMITIVE(map_subscriptSetter)
 {
   if (!validateKey(vm, args[1])) return false;
 
-  wrenMapSet(vm, AS_MAP(args[0]), args[1], args[2]);
+  vm->MapSet( AS_MAP(args[0]), args[1], args[2]);
   RETURN_VAL(args[2]);
 }
 
@@ -536,7 +536,7 @@ DEF_PRIMITIVE(map_addCore)
 {
   if (!validateKey(vm, args[1])) return false;
   
-  wrenMapSet(vm, AS_MAP(args[0]), args[1], args[2]);
+  vm->MapSet( AS_MAP(args[0]), args[1], args[2]);
   
   // Return the map itself.
   RETURN_VAL(args[0]);
@@ -544,7 +544,7 @@ DEF_PRIMITIVE(map_addCore)
 
 DEF_PRIMITIVE(map_clear)
 {
-  wrenMapClear(vm, AS_MAP(args[0]));
+  vm->MapClear( AS_MAP(args[0]));
   RETURN_NULL;
 }
 
@@ -597,7 +597,7 @@ DEF_PRIMITIVE(map_remove)
 {
   if (!validateKey(vm, args[1])) return false;
 
-  RETURN_VAL(wrenMapRemoveKey(vm, AS_MAP(args[0]), args[1]));
+  RETURN_VAL(vm->MapRemoveKey( AS_MAP(args[0]), args[1]));
 }
 
 DEF_PRIMITIVE(map_keyIteratorValue)
@@ -868,7 +868,7 @@ DEF_PRIMITIVE(num_sign)
 
 DEF_PRIMITIVE(num_toString)
 {
-  RETURN_VAL(wrenNumToString(vm, AS_NUM(args[0])));
+  RETURN_VAL(vm->NumToString( AS_NUM(args[0])));
 }
 
 DEF_PRIMITIVE(num_truncate)
@@ -905,7 +905,7 @@ DEF_PRIMITIVE(object_is)
     RETURN_ERROR("Right operand must be a class.");
   }
 
-  ObjClass *classObj = wrenGetClass(vm, args[0]);
+  ObjClass *classObj = vm->GetClass( args[0]);
   ObjClass *baseClassObj = AS_CLASS(args[1]);
 
   // Walk the superclass chain looking for the class.
@@ -924,12 +924,12 @@ DEF_PRIMITIVE(object_toString)
 {
   Obj* obj = AS_OBJ(args[0]);
   Value name = OBJ_VAL(obj->classObj->name);
-  RETURN_VAL(wrenStringFormat(vm, "instance of @", name));
+  RETURN_VAL(vm->StringFormat( "instance of @", name));
 }
 
 DEF_PRIMITIVE(object_type)
 {
-  RETURN_OBJ(wrenGetClass(vm, args[0]));
+  RETURN_OBJ(vm->GetClass( args[0]));
 }
 
 DEF_PRIMITIVE(range_from)
@@ -1000,13 +1000,13 @@ DEF_PRIMITIVE(range_toString)
 {
   ObjRange* range = AS_RANGE(args[0]);
 
-  Value from = wrenNumToString(vm, range->from);
+  Value from = vm->NumToString( range->from);
   vm->PushRoot( AS_OBJ(from));
 
-  Value to = wrenNumToString(vm, range->to);
+  Value to = vm->NumToString( range->to);
   vm->PushRoot( AS_OBJ(to));
 
-  Value result = wrenStringFormat(vm, "@$@", from,
+  Value result = vm->StringFormat( "@$@", from,
                                   range->isInclusive ? ".." : "...", to);
 
   vm->PopRoot();
@@ -1028,7 +1028,7 @@ DEF_PRIMITIVE(string_fromCodePoint)
     RETURN_ERROR("Code point cannot be greater than 0x10ffff.");
   }
 
-  RETURN_VAL(wrenStringFromCodePoint(vm, codePoint));
+  RETURN_VAL(vm->StringFromCodePoint( codePoint));
 }
 
 DEF_PRIMITIVE(string_fromByte)
@@ -1043,7 +1043,7 @@ DEF_PRIMITIVE(string_fromByte)
   {
     RETURN_ERROR("Byte cannot be greater than 0xff.");
   }
-  RETURN_VAL(wrenStringFromByte(vm, (uint8_t) byte));
+  RETURN_VAL(vm->StringFromByte( (uint8_t) byte));
 }
 
 DEF_PRIMITIVE(string_byteAt)
@@ -1180,7 +1180,7 @@ DEF_PRIMITIVE(string_iteratorValue)
   uint32_t index = validateIndex(vm, args[1], string->length, "Iterator");
   if (index == UINT32_MAX) return false;
 
-  RETURN_VAL(wrenStringCodePointAt(vm, string, index));
+  RETURN_VAL(vm->StringCodePointAt( string, index));
 }
 
 DEF_PRIMITIVE(string_startsWith)
@@ -1199,7 +1199,7 @@ DEF_PRIMITIVE(string_startsWith)
 DEF_PRIMITIVE(string_plus)
 {
   if (!validateString(vm, args[1], "Right operand")) return false;
-  RETURN_VAL(wrenStringFormat(vm, "@@", args[0], args[1]));
+  RETURN_VAL(vm->StringFormat( "@@", args[0], args[1]));
 }
 
 DEF_PRIMITIVE(string_subscript)
@@ -1211,7 +1211,7 @@ DEF_PRIMITIVE(string_subscript)
     int index = validateIndex(vm, args[1], string->length, "Subscript");
     if (index == -1) return false;
 
-    RETURN_VAL(wrenStringCodePointAt(vm, string, index));
+    RETURN_VAL(vm->StringCodePointAt( string, index));
   }
 
   if (!IS_RANGE(args[1]))
@@ -1224,7 +1224,7 @@ DEF_PRIMITIVE(string_subscript)
   int start = calculateRange(vm, AS_RANGE(args[1]), &count, &step);
   if (start == -1) return false;
 
-  RETURN_VAL(wrenNewStringFromRange(vm, string, start, count, step));
+  RETURN_VAL(vm->NewStringFromRange( string, start, count, step));
 }
 
 DEF_PRIMITIVE(string_toString)
@@ -1253,10 +1253,10 @@ DEF_PRIMITIVE(system_writeString)
 // Creates either the Object or Class class in the core module with [name].
 static ObjClass* defineClass(WrenVM* vm, ObjModule* module, const char* name)
 {
-  ObjString* nameString = AS_STRING(wrenNewString(vm, name));
+  ObjString* nameString = AS_STRING(vm->NewString( name));
   vm->PushRoot( (Obj*)nameString);
 
-  ObjClass* classObj = wrenNewSingleClass(vm, 0, nameString);
+  ObjClass* classObj = vm->NewSingleClass( 0, nameString);
 
   vm->DefineVariable( module, name, nameString->length, OBJ_VAL(classObj), nullptr);
 
@@ -1270,7 +1270,7 @@ void wrenInitializeCore(WrenVM* vm)
   vm->PushRoot( (Obj*)coreModule);
   
   // The core module's key is null in the module map.
-  wrenMapSet(vm, vm->modules, NULL_VAL, OBJ_VAL(coreModule));
+  vm->MapSet( vm->modules, NULL_VAL, OBJ_VAL(coreModule));
   vm->PopRoot(); // coreModule.
 
   // Define the root Object class. This has to be done a little specially
@@ -1285,7 +1285,7 @@ void wrenInitializeCore(WrenVM* vm)
 
   // Now we can define Class, which is a subclass of Object.
   vm->classClass = defineClass(vm, coreModule, "Class");
-  wrenBindSuperclass(vm, vm->classClass, vm->objectClass);
+  vm->BindSuperclass( vm->classClass, vm->objectClass);
   PRIMITIVE(vm->classClass, "name", class_name);
   PRIMITIVE(vm->classClass, "supertype", class_supertype);
   PRIMITIVE(vm->classClass, "toString", class_toString);
@@ -1301,7 +1301,7 @@ void wrenInitializeCore(WrenVM* vm)
 
   // Do this after wiring up the metaclasses so objectMetaclass doesn't get
   // collected.
-  wrenBindSuperclass(vm, objectMetaclass, vm->classClass);
+  vm->BindSuperclass( objectMetaclass, vm->classClass);
 
   PRIMITIVE(objectMetaclass, "same(_,_)", object_same);
 

@@ -5,7 +5,7 @@
 
 int SymbolTable::add(WrenVM* vm, const char* name, size_t length)
 {
-  ObjString* symbol = AS_STRING(wrenNewStringLength(vm, name, length));
+  ObjString* symbol = AS_STRING(vm->NewStringLength( name, length));
 
   vm->PushRoot( symbol);
   buffer_.push_back(symbol);
@@ -40,7 +40,7 @@ void SymbolTable::blacken(WrenVM* vm)
 {
   for (int i = 0; i < buffer_.size(); i++)
   {
-    wrenGrayObj(vm, buffer_[i]);
+    vm->GrayObj( buffer_[i]);
   }
 
   // Keep track of how much memory is still in use.

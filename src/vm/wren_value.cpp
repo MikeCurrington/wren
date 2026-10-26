@@ -51,12 +51,12 @@ ObjClass::ObjClass(WrenVM* vm, int _numFields, ObjString* _name)
   // the class is safe from the collector here.
 }
 
-ObjClass* wrenNewSingleClass(WrenVM* vm, int numFields, ObjString* name)
+ObjClass* WrenVM::NewSingleClass(int numFields, ObjString* name)
 {
-  return wrenConstruct<ObjClass>(vm, 0, numFields, name);
+  return wrenConstruct<ObjClass>(this, 0, numFields, name);
 }
 
-void wrenBindSuperclass(WrenVM* vm, ObjClass* subclass, ObjClass* superclass)
+void WrenVM::BindSuperclass(ObjClass* subclass, ObjClass* superclass)
 {
   ASSERT(superclass != nullptr, "Must have superclass.");
 
@@ -76,45 +76,45 @@ void wrenBindSuperclass(WrenVM* vm, ObjClass* subclass, ObjClass* superclass)
   // Inherit methods from its superclass.
   for (int i = 0; i < superclass->methods.size(); i++)
   {
-    wrenBindMethod(vm, subclass, i, superclass->methods[i]);
+    AddMethod( subclass, i, superclass->methods[i]);
   }
 }
 
-ObjClass* wrenNewClass(WrenVM* vm, ObjClass* superclass, int numFields,
+ObjClass* WrenVM::NewClass(ObjClass* superclass, int numFields,
                        ObjString* name)
 {
   // Create the metaclass.
-  Value metaclassName = wrenStringFormat(vm, "@ metaclass", OBJ_VAL(name));
-  vm->PushRoot( AS_OBJ(metaclassName));
+  Value metaclassName = StringFormat( "@ metaclass", OBJ_VAL(name));
+  this->PushRoot( AS_OBJ(metaclassName));
 
-  ObjClass* metaclass = wrenNewSingleClass(vm, 0, AS_STRING(metaclassName));
-  metaclass->classObj = vm->classClass;
+  ObjClass* metaclass = NewSingleClass( 0, AS_STRING(metaclassName));
+  metaclass->classObj = this->classClass;
 
-  vm->PopRoot();
+  this->PopRoot();
 
   // Make sure the metaclass isn't collected when we allocate the class.
-  vm->PushRoot( (Obj*)metaclass);
+  this->PushRoot( (Obj*)metaclass);
 
   // Metaclasses always inherit Class and do not parallel the non-metaclass
   // hierarchy.
-  wrenBindSuperclass(vm, metaclass, vm->classClass);
+  BindSuperclass( metaclass, this->classClass);
 
-  ObjClass* classObj = wrenNewSingleClass(vm, numFields, name);
+  ObjClass* classObj = NewSingleClass( numFields, name);
 
   // Make sure the class isn't collected while the inherited methods are being
   // bound.
-  vm->PushRoot( (Obj*)classObj);
+  this->PushRoot( (Obj*)classObj);
 
   classObj->classObj = metaclass;
-  wrenBindSuperclass(vm, classObj, superclass);
+  BindSuperclass( classObj, superclass);
 
-  vm->PopRoot();
-  vm->PopRoot();
+  this->PopRoot();
+  this->PopRoot();
 
   return classObj;
 }
 
-void wrenBindMethod(WrenVM* vm, ObjClass* classObj, int symbol, Method method)
+void WrenVM::AddMethod(ObjClass* classObj, int symbol, Method method)
 {
   // Make sure the buffer is big enough to contain the symbol's index.
   if (symbol >= classObj->methods.size())
@@ -173,7 +173,7 @@ ObjFiber::ObjFiber(WrenVM* vm, ObjClosure* _closure)
   if (_closure != nullptr)
   {
     // Initialize the first call frame.
-    wrenAppendCallFrame(vm, this, _closure, stack);
+    wrenAppendCallFrame(this, _closure, stack);
 
     // The first slot always holds the closure.
     stackTop[0] = OBJ_VAL(_closure);
@@ -183,14 +183,14 @@ ObjFiber::ObjFiber(WrenVM* vm, ObjClosure* _closure)
   vm->PopRoot();
 }
 
-void wrenEnsureStack(WrenVM* vm, ObjFiber* fiber, int needed)
+void WrenVM::EnsureStack(ObjFiber* fiber, int needed)
 {
   if (fiber->stackCapacity >= needed) return;
   
   int capacity = wrenPowerOf2Ceil(needed);
   
   Value* oldStack = fiber->stack;
-  fiber->stack = (Value*)wrenReallocate(vm, fiber->stack,
+  fiber->stack = (Value*)wrenReallocate(this, fiber->stack,
                                         sizeof(Value) * fiber->stackCapacity,
                                         sizeof(Value) * capacity);
   fiber->stackCapacity = capacity;
@@ -203,9 +203,9 @@ void wrenEnsureStack(WrenVM* vm, ObjFiber* fiber, int needed)
   if (fiber->stack != oldStack)
   {
     // Top of the stack.
-    if (vm->apiStack >= oldStack && vm->apiStack <= fiber->stackTop)
+    if (this->apiStack >= oldStack && this->apiStack <= fiber->stackTop)
     {
-      vm->apiStack = fiber->stack + (vm->apiStack - oldStack);
+      this->apiStack = fiber->stack + (this->apiStack - oldStack);
     }
     
     // Stack pointer for each call frame.
@@ -251,9 +251,9 @@ ObjFn::ObjFn(WrenVM* vm, ObjModule* _module, int _maxSlots, FnDebug* _debug)
   // The code and constants buffers construct themselves empty.
 }
 
-void wrenFunctionBindName(WrenVM* vm, ObjFn* fn, const char* name, int length)
+void WrenVM::FunctionBindName(ObjFn* fn, const char* name, int length)
 {
-  fn->debug->name = ALLOCATE_ARRAY(vm, char, length + 1);
+  fn->debug->name = ALLOCATE_ARRAY(this, char, length + 1);
   memcpy(fn->debug->name, name, length);
   fn->debug->name[length] = '\0';
 }
@@ -276,14 +276,14 @@ ObjList::ObjList(WrenVM* vm, uint32_t numElements)
   elements.resize(numElements, NULL_VAL);
 }
 
-void wrenListInsert(WrenVM* vm, ObjList* list, Value value, uint32_t index)
+void WrenVM::ListInsert(ObjList* list, Value value, uint32_t index)
 {
-  if (IS_OBJ(value)) vm->PushRoot( AS_OBJ(value));
+  if (IS_OBJ(value)) this->PushRoot( AS_OBJ(value));
 
   // Add a slot at the end of the list.
   list->elements.push_back(NULL_VAL);
 
-  if (IS_OBJ(value)) vm->PopRoot();
+  if (IS_OBJ(value)) this->PopRoot();
 
   // Shift the existing elements down.
   for (uint32_t i = list->elements.size() - 1; i > index; i--)
@@ -295,11 +295,11 @@ void wrenListInsert(WrenVM* vm, ObjList* list, Value value, uint32_t index)
   list->elements[index] = value;
 }
 
-Value wrenListRemoveAt(WrenVM* vm, ObjList* list, uint32_t index)
+Value WrenVM::ListRemoveAt(ObjList* list, uint32_t index)
 {
   Value removed = list->elements[index];
 
-  if (IS_OBJ(removed)) vm->PushRoot( AS_OBJ(removed));
+  if (IS_OBJ(removed)) this->PushRoot( AS_OBJ(removed));
 
   // Shift items up.
   for (int i = index; i < list->elements.size() - 1; i++)
@@ -313,7 +313,7 @@ Value wrenListRemoveAt(WrenVM* vm, ObjList* list, uint32_t index)
     list->elements.shrink_to_fit();
   }
 
-  if (IS_OBJ(removed)) vm->PopRoot();
+  if (IS_OBJ(removed)) this->PopRoot();
 
   list->elements.pop_back();
   return removed;
@@ -498,10 +498,10 @@ static bool insertEntry(MapEntry* entries, uint32_t capacity,
 }
 
 // Updates [map]'s entry array to [capacity].
-static void resizeMap(WrenVM* vm, ObjMap* map, uint32_t capacity)
+void WrenVM::ResizeMap(ObjMap* map, uint32_t capacity)
 {
   // Create the new empty hash table.
-  MapEntry* entries = ALLOCATE_ARRAY(vm, MapEntry, capacity);
+  MapEntry* entries = ALLOCATE_ARRAY(this, MapEntry, capacity);
   for (uint32_t i = 0; i < capacity; i++)
   {
     entries[i].key = UNDEFINED_VAL;
@@ -523,7 +523,7 @@ static void resizeMap(WrenVM* vm, ObjMap* map, uint32_t capacity)
   }
 
   // Replace the array.
-  DEALLOCATE(vm, map->entries);
+  DEALLOCATE(this, map->entries);
   map->entries = entries;
   map->capacity = capacity;
 }
@@ -536,7 +536,7 @@ Value wrenMapGet(ObjMap* map, Value key)
   return UNDEFINED_VAL;
 }
 
-void wrenMapSet(WrenVM* vm, ObjMap* map, Value key, Value value)
+void WrenVM::MapSet(ObjMap* map, Value key, Value value)
 {
   // If the map is getting too full, make room first.
   if (map->count + 1 > map->capacity * MAP_LOAD_PERCENT / 100)
@@ -545,7 +545,7 @@ void wrenMapSet(WrenVM* vm, ObjMap* map, Value key, Value value)
     uint32_t capacity = map->capacity * GROW_FACTOR;
     if (capacity < MIN_CAPACITY) capacity = MIN_CAPACITY;
 
-    resizeMap(vm, map, capacity);
+    ResizeMap(map, capacity);
   }
 
   if (insertEntry(map->entries, map->capacity, key, value))
@@ -555,15 +555,15 @@ void wrenMapSet(WrenVM* vm, ObjMap* map, Value key, Value value)
   }
 }
 
-void wrenMapClear(WrenVM* vm, ObjMap* map)
+void WrenVM::MapClear(ObjMap* map)
 {
-  DEALLOCATE(vm, map->entries);
+  DEALLOCATE(this, map->entries);
   map->entries = nullptr;
   map->capacity = 0;
   map->count = 0;
 }
 
-Value wrenMapRemoveKey(WrenVM* vm, ObjMap* map, Value key)
+Value WrenVM::MapRemoveKey(ObjMap* map, Value key)
 {
   MapEntry* entry;
   if (!findEntry(map->entries, map->capacity, key, &entry)) return NULL_VAL;
@@ -575,14 +575,14 @@ Value wrenMapRemoveKey(WrenVM* vm, ObjMap* map, Value key)
   entry->key = UNDEFINED_VAL;
   entry->value = TRUE_VAL;
 
-  if (IS_OBJ(value)) vm->PushRoot( AS_OBJ(value));
+  if (IS_OBJ(value)) this->PushRoot( AS_OBJ(value));
 
   map->count--;
 
   if (map->count == 0)
   {
     // Removed the last item, so free the array.
-    wrenMapClear(vm, map);
+    MapClear( map);
   }
   else if (map->capacity > MIN_CAPACITY &&
            map->count < map->capacity / GROW_FACTOR * MAP_LOAD_PERCENT / 100)
@@ -592,10 +592,10 @@ Value wrenMapRemoveKey(WrenVM* vm, ObjMap* map, Value key)
 
     // The map is getting empty, so shrink the entry array back down.
     // TODO: Should we do this less aggressively than we grow?
-    resizeMap(vm, map, capacity);
+    ResizeMap(map, capacity);
   }
 
-  if (IS_OBJ(value)) vm->PopRoot();
+  if (IS_OBJ(value)) this->PopRoot();
   return value;
 }
 
@@ -628,9 +628,9 @@ ObjString::ObjString(WrenVM* vm, size_t _length)
 //
 // The caller is expected to fill in the buffer and then calculate the string's
 // hash.
-static ObjString* allocateString(WrenVM* vm, size_t length)
+ObjString* WrenVM::AllocateString(size_t length)
 {
-  return wrenConstruct<ObjString>(vm, length + 1, length);
+  return wrenConstruct<ObjString>(this, length + 1, length);
 }
 
 // Calculates and stores the hash code for [string].
@@ -651,18 +651,18 @@ static void hashString(ObjString* string)
   string->hash = hash;
 }
 
-Value wrenNewString(WrenVM* vm, const char* text)
+Value WrenVM::NewString(const char* text)
 {
-  return wrenNewStringLength(vm, text, strlen(text));
+  return NewStringLength( text, strlen(text));
 }
 
-Value wrenNewStringLength(WrenVM* vm, const char* text, size_t length)
+Value WrenVM::NewStringLength(const char* text, size_t length)
 {
   // Allow NULL if the string is empty since byte buffers don't allocate any
   // characters for a zero-length string.
   ASSERT(length == 0 || text != nullptr, "Unexpected NULL string.");
   
-  ObjString* string = allocateString(vm, length);
+  ObjString* string = AllocateString(length);
   
   // Copy the string (if given one).
   if (length > 0 && text != nullptr) memcpy(string->value, text, length);
@@ -672,7 +672,7 @@ Value wrenNewStringLength(WrenVM* vm, const char* text, size_t length)
 }
 
 
-Value wrenNewStringFromRange(WrenVM* vm, ObjString* source, int start,
+Value WrenVM::NewStringFromRange(ObjString* source, int start,
                              uint32_t count, int step)
 {
   uint8_t* from = (uint8_t*)source->value;
@@ -682,7 +682,7 @@ Value wrenNewStringFromRange(WrenVM* vm, ObjString* source, int start,
     length += wrenUtf8DecodeNumBytes(from[start + i * step]);
   }
 
-  ObjString* result = allocateString(vm, length);
+  ObjString* result = AllocateString(length);
   result->value[length] = '\0';
 
   uint8_t* to = (uint8_t*)result->value;
@@ -701,21 +701,21 @@ Value wrenNewStringFromRange(WrenVM* vm, ObjString* source, int start,
   return OBJ_VAL(result);
 }
 
-Value wrenNumToString(WrenVM* vm, double value)
+Value WrenVM::NumToString(double value)
 {
   // Edge case: If the value is NaN or infinity, different versions of libc
   // produce different outputs (some will format it signed and some won't). To
   // get reliable output, handle it ourselves.
-  if (isnan(value)) return CONST_STRING(vm, "nan");
+  if (isnan(value)) return CONST_STRING(this, "nan");
   if (isinf(value))
   {
     if (value > 0.0)
     {
-      return CONST_STRING(vm, "infinity");
+      return CONST_STRING(this, "infinity");
     }
     else
     {
-      return CONST_STRING(vm, "-infinity");
+      return CONST_STRING(this, "-infinity");
     }
   }
 
@@ -737,15 +737,15 @@ Value wrenNumToString(WrenVM* vm, double value)
   // = 24
   char buffer[24];
   int length = snprintf(buffer, sizeof(buffer), "%.14g", value);
-  return wrenNewStringLength(vm, buffer, length);
+  return NewStringLength( buffer, length);
 }
 
-Value wrenStringFromCodePoint(WrenVM* vm, int value)
+Value WrenVM::StringFromCodePoint(int value)
 {
   int length = wrenUtf8EncodeNumBytes(value);
   ASSERT(length != 0, "Value out of range.");
 
-  ObjString* string = allocateString(vm, length);
+  ObjString* string = AllocateString(length);
 
   wrenUtf8Encode(value, (uint8_t*)string->value);
   hashString(string);
@@ -753,16 +753,16 @@ Value wrenStringFromCodePoint(WrenVM* vm, int value)
   return OBJ_VAL(string);
 }
 
-Value wrenStringFromByte(WrenVM *vm, uint8_t value)
+Value WrenVM::StringFromByte(uint8_t value)
 {
   int length = 1;
-  ObjString* string = allocateString(vm, length);
+  ObjString* string = AllocateString(length);
   string->value[0] = value;
   hashString(string);
   return OBJ_VAL(string);
 }
 
-Value wrenStringFormat(WrenVM* vm, const char* format, ...)
+Value WrenVM::StringFormat(const char* format, ...)
 {
   va_list argList;
 
@@ -790,7 +790,7 @@ Value wrenStringFormat(WrenVM* vm, const char* format, ...)
   va_end(argList);
 
   // Concatenate the string.
-  ObjString* result = allocateString(vm, totalLength);
+  ObjString* result = AllocateString(totalLength);
 
   va_start(argList, format);
   char* start = result->value;
@@ -827,7 +827,7 @@ Value wrenStringFormat(WrenVM* vm, const char* format, ...)
   return OBJ_VAL(result);
 }
 
-Value wrenStringCodePointAt(WrenVM* vm, ObjString* string, uint32_t index)
+Value WrenVM::StringCodePointAt(ObjString* string, uint32_t index)
 {
   ASSERT(index < string->length, "Index out of bounds.");
 
@@ -839,10 +839,10 @@ Value wrenStringCodePointAt(WrenVM* vm, ObjString* string, uint32_t index)
     char bytes[2];
     bytes[0] = string->value[index];
     bytes[1] = '\0';
-    return wrenNewStringLength(vm, bytes, 1);
+    return NewStringLength( bytes, 1);
   }
 
-  return wrenStringFromCodePoint(vm, codePoint);
+  return StringFromCodePoint( codePoint);
 }
 
 // Uses the Boyer-Moore-Horspool string matching algorithm.
@@ -915,7 +915,7 @@ ObjUpvalue::ObjUpvalue(WrenVM* vm, Value* _value)
   next = nullptr;
 }
 
-void wrenGrayObj(WrenVM* vm, Obj* obj)
+void WrenVM::GrayObj(Obj* obj)
 {
   if (obj == nullptr) return;
 
@@ -927,116 +927,116 @@ void wrenGrayObj(WrenVM* vm, Obj* obj)
 
   // Add it to the gray list so it can be recursively explored for
   // more marks later.
-  vm->gray.emplace_back(obj);
+  this->gray.emplace_back(obj);
 }
 
-void wrenGrayValue(WrenVM* vm, Value value)
+void WrenVM::GrayValue(Value value)
 {
   if (!IS_OBJ(value)) return;
-  wrenGrayObj(vm, AS_OBJ(value));
+  GrayObj( AS_OBJ(value));
 }
 
-void wrenGrayBuffer(WrenVM* vm, ValueBuffer* buffer)
+void WrenVM::GrayBuffer(ValueBuffer* buffer)
 {
   for (auto& v: *buffer)
   {
-    wrenGrayValue(vm, v);
+    GrayValue( v);
   }
 }
 
-static void blackenClass(WrenVM* vm, ObjClass* classObj)
+void WrenVM::BlackenClass(ObjClass* classObj)
 {
   // The metaclass.
-  wrenGrayObj(vm, (Obj*)classObj->classObj);
+  GrayObj( (Obj*)classObj->classObj);
 
   // The superclass.
-  wrenGrayObj(vm, (Obj*)classObj->superclass);
+  GrayObj( (Obj*)classObj->superclass);
 
   // Method function objects.
   for (int i = 0; i < classObj->methods.size(); i++)
   {
     if (classObj->methods[i].type == METHOD_BLOCK)
     {
-      wrenGrayObj(vm, (Obj*)classObj->methods[i].as.closure);
+      GrayObj( (Obj*)classObj->methods[i].as.closure);
     }
   }
 
-  wrenGrayObj(vm, (Obj*)classObj->name);
+  GrayObj( (Obj*)classObj->name);
 
-  if(!IS_NULL(classObj->attributes)) wrenGrayObj(vm, AS_OBJ(classObj->attributes));
+  if(!IS_NULL(classObj->attributes)) GrayObj( AS_OBJ(classObj->attributes));
 
   // Keep track of how much memory is still in use.
-  vm->bytesAllocated += sizeof(ObjClass);
-  vm->bytesAllocated += classObj->methods.capacity() * sizeof(Method);
+  this->bytesAllocated += sizeof(ObjClass);
+  this->bytesAllocated += classObj->methods.capacity() * sizeof(Method);
 }
 
-static void blackenClosure(WrenVM* vm, ObjClosure* closure)
+void WrenVM::BlackenClosure(ObjClosure* closure)
 {
   // Mark the function.
-  wrenGrayObj(vm, (Obj*)closure->fn);
+  GrayObj( (Obj*)closure->fn);
 
   // Mark the upvalues.
   for (int i = 0; i < closure->fn->numUpvalues; i++)
   {
-    wrenGrayObj(vm, (Obj*)closure->upvalues[i]);
+    GrayObj( (Obj*)closure->upvalues[i]);
   }
 
   // Keep track of how much memory is still in use.
-  vm->bytesAllocated += sizeof(ObjClosure);
-  vm->bytesAllocated += sizeof(ObjUpvalue*) * closure->fn->numUpvalues;
+  this->bytesAllocated += sizeof(ObjClosure);
+  this->bytesAllocated += sizeof(ObjUpvalue*) * closure->fn->numUpvalues;
 }
 
-static void blackenFiber(WrenVM* vm, ObjFiber* fiber)
+void WrenVM::BlackenFiber(ObjFiber* fiber)
 {
   // Stack functions.
   for (int i = 0; i < fiber->numFrames; i++)
   {
-    wrenGrayObj(vm, (Obj*)fiber->frames[i].closure);
+    GrayObj( (Obj*)fiber->frames[i].closure);
   }
 
   // Stack variables.
   for (Value* slot = fiber->stack; slot < fiber->stackTop; slot++)
   {
-    wrenGrayValue(vm, *slot);
+    GrayValue( *slot);
   }
 
   // Open upvalues.
   ObjUpvalue* upvalue = fiber->openUpvalues;
   while (upvalue != nullptr)
   {
-    wrenGrayObj(vm, (Obj*)upvalue);
+    GrayObj( (Obj*)upvalue);
     upvalue = upvalue->next;
   }
 
   // The caller.
-  wrenGrayObj(vm, (Obj*)fiber->caller);
-  wrenGrayValue(vm, fiber->error);
+  GrayObj( (Obj*)fiber->caller);
+  GrayValue( fiber->error);
 
   // Keep track of how much memory is still in use.
-  vm->bytesAllocated += sizeof(ObjFiber);
-  vm->bytesAllocated += fiber->frameCapacity * sizeof(CallFrame);
-  vm->bytesAllocated += fiber->stackCapacity * sizeof(Value);
+  this->bytesAllocated += sizeof(ObjFiber);
+  this->bytesAllocated += fiber->frameCapacity * sizeof(CallFrame);
+  this->bytesAllocated += fiber->stackCapacity * sizeof(Value);
 }
 
-static void blackenFn(WrenVM* vm, ObjFn* fn)
+void WrenVM::BlackenFn(ObjFn* fn)
 {
   // Mark the constants.
-  wrenGrayBuffer(vm, &fn->constants);
+  GrayBuffer( &fn->constants);
 
   // Mark the module it belongs to, in case it's been unloaded.
-  wrenGrayObj(vm, (Obj*)fn->module);
+  GrayObj( (Obj*)fn->module);
 
   // Keep track of how much memory is still in use.
-  vm->bytesAllocated += sizeof(ObjFn);
-  vm->bytesAllocated += sizeof(uint8_t) * fn->code.capacity();
-  vm->bytesAllocated += sizeof(Value) * fn->constants.capacity();
+  this->bytesAllocated += sizeof(ObjFn);
+  this->bytesAllocated += sizeof(uint8_t) * fn->code.capacity();
+  this->bytesAllocated += sizeof(Value) * fn->constants.capacity();
   
   // The debug line number buffer.
-  vm->bytesAllocated += sizeof(int) * fn->code.capacity();
+  this->bytesAllocated += sizeof(int) * fn->code.capacity();
   // TODO: What about the function name?
 }
 
-static void blackenForeign(WrenVM* vm, ObjForeign* foreign)
+void WrenVM::BlackenForeign(ObjForeign* foreign)
 {
   // TODO: Keep track of how much memory the foreign object uses. We can store
   // this in each foreign object, but it will balloon the size. We may not want
@@ -1045,32 +1045,32 @@ static void blackenForeign(WrenVM* vm, ObjForeign* foreign)
   // always have to explicitly store it.
 }
 
-static void blackenInstance(WrenVM* vm, ObjInstance* instance)
+void WrenVM::BlackenInstance(ObjInstance* instance)
 {
-  wrenGrayObj(vm, (Obj*)instance->classObj);
+  GrayObj( (Obj*)instance->classObj);
 
   // Mark the fields.
   for (int i = 0; i < instance->classObj->numFields; i++)
   {
-    wrenGrayValue(vm, instance->fields[i]);
+    GrayValue( instance->fields[i]);
   }
 
   // Keep track of how much memory is still in use.
-  vm->bytesAllocated += sizeof(ObjInstance);
-  vm->bytesAllocated += sizeof(Value) * instance->classObj->numFields;
+  this->bytesAllocated += sizeof(ObjInstance);
+  this->bytesAllocated += sizeof(Value) * instance->classObj->numFields;
 }
 
-static void blackenList(WrenVM* vm, ObjList* list)
+void WrenVM::BlackenList(ObjList* list)
 {
   // Mark the elements.
-  wrenGrayBuffer(vm, &list->elements);
+  GrayBuffer( &list->elements);
 
   // Keep track of how much memory is still in use.
-  vm->bytesAllocated += sizeof(ObjList);
-  vm->bytesAllocated += sizeof(Value) * list->elements.capacity();
+  this->bytesAllocated += sizeof(ObjList);
+  this->bytesAllocated += sizeof(Value) * list->elements.capacity();
 }
 
-static void blackenMap(WrenVM* vm, ObjMap* map)
+void WrenVM::BlackenMap(ObjMap* map)
 {
   // Mark the entries.
   for (uint32_t i = 0; i < map->capacity; i++)
@@ -1078,53 +1078,53 @@ static void blackenMap(WrenVM* vm, ObjMap* map)
     MapEntry* entry = &map->entries[i];
     if (IS_UNDEFINED(entry->key)) continue;
 
-    wrenGrayValue(vm, entry->key);
-    wrenGrayValue(vm, entry->value);
+    GrayValue( entry->key);
+    GrayValue( entry->value);
   }
 
   // Keep track of how much memory is still in use.
-  vm->bytesAllocated += sizeof(ObjMap);
-  vm->bytesAllocated += sizeof(MapEntry) * map->capacity;
+  this->bytesAllocated += sizeof(ObjMap);
+  this->bytesAllocated += sizeof(MapEntry) * map->capacity;
 }
 
-static void blackenModule(WrenVM* vm, ObjModule* module)
+void WrenVM::BlackenModule(ObjModule* module)
 {
   // Top-level variables.
   for (int i = 0; i < module->variables.size(); i++)
   {
-    wrenGrayValue(vm, module->variables[i]);
+    GrayValue( module->variables[i]);
   }
 
-  module->variableNames.blacken(vm);
+  module->variableNames.blacken(this);
 
-  wrenGrayObj(vm, (Obj*)module->name);
+  GrayObj( (Obj*)module->name);
 
   // Keep track of how much memory is still in use.
-  vm->bytesAllocated += sizeof(ObjModule);
+  this->bytesAllocated += sizeof(ObjModule);
 }
 
-static void blackenRange(WrenVM* vm, ObjRange* range)
+void WrenVM::BlackenRange(ObjRange* range)
 {
   // Keep track of how much memory is still in use.
-  vm->bytesAllocated += sizeof(ObjRange);
+  this->bytesAllocated += sizeof(ObjRange);
 }
 
-static void blackenString(WrenVM* vm, ObjString* string)
+void WrenVM::BlackenString(ObjString* string)
 {
   // Keep track of how much memory is still in use.
-  vm->bytesAllocated += sizeof(ObjString) + string->length + 1;
+  this->bytesAllocated += sizeof(ObjString) + string->length + 1;
 }
 
-static void blackenUpvalue(WrenVM* vm, ObjUpvalue* upvalue)
+void WrenVM::BlackenUpvalue(ObjUpvalue* upvalue)
 {
   // Mark the closed-over object (in case it is closed).
-  wrenGrayValue(vm, upvalue->closed);
+  GrayValue( upvalue->closed);
 
   // Keep track of how much memory is still in use.
-  vm->bytesAllocated += sizeof(ObjUpvalue);
+  this->bytesAllocated += sizeof(ObjUpvalue);
 }
 
-static void blackenObject(WrenVM* vm, Obj* obj)
+void WrenVM::BlackenObject(Obj* obj)
 {
 #if WREN_DEBUG_TRACE_MEMORY
   printf("mark ");
@@ -1135,34 +1135,34 @@ static void blackenObject(WrenVM* vm, Obj* obj)
   // Traverse the object's fields.
   switch (obj->type)
   {
-    case OBJ_CLASS:    blackenClass(   vm, (ObjClass*)   obj); break;
-    case OBJ_CLOSURE:  blackenClosure( vm, (ObjClosure*) obj); break;
-    case OBJ_FIBER:    blackenFiber(   vm, (ObjFiber*)   obj); break;
-    case OBJ_FN:       blackenFn(      vm, (ObjFn*)      obj); break;
-    case OBJ_FOREIGN:  blackenForeign( vm, (ObjForeign*) obj); break;
-    case OBJ_INSTANCE: blackenInstance(vm, (ObjInstance*)obj); break;
-    case OBJ_LIST:     blackenList(    vm, (ObjList*)    obj); break;
-    case OBJ_MAP:      blackenMap(     vm, (ObjMap*)     obj); break;
-    case OBJ_MODULE:   blackenModule(  vm, (ObjModule*)  obj); break;
-    case OBJ_RANGE:    blackenRange(   vm, (ObjRange*)   obj); break;
-    case OBJ_STRING:   blackenString(  vm, (ObjString*)  obj); break;
-    case OBJ_UPVALUE:  blackenUpvalue( vm, (ObjUpvalue*) obj); break;
+    case OBJ_CLASS:    BlackenClass((ObjClass*)   obj); break;
+    case OBJ_CLOSURE:  BlackenClosure((ObjClosure*) obj); break;
+    case OBJ_FIBER:    BlackenFiber((ObjFiber*)   obj); break;
+    case OBJ_FN:       BlackenFn((ObjFn*)      obj); break;
+    case OBJ_FOREIGN:  BlackenForeign((ObjForeign*) obj); break;
+    case OBJ_INSTANCE: BlackenInstance((ObjInstance*)obj); break;
+    case OBJ_LIST:     BlackenList((ObjList*)    obj); break;
+    case OBJ_MAP:      BlackenMap((ObjMap*)     obj); break;
+    case OBJ_MODULE:   BlackenModule((ObjModule*)  obj); break;
+    case OBJ_RANGE:    BlackenRange((ObjRange*)   obj); break;
+    case OBJ_STRING:   BlackenString((ObjString*)  obj); break;
+    case OBJ_UPVALUE:  BlackenUpvalue((ObjUpvalue*) obj); break;
   }
 }
 
-void wrenBlackenObjects(WrenVM* vm)
+void WrenVM::BlackenObjects()
 {
-  while (!vm->gray.empty())
+  while (!this->gray.empty())
   {
     // Pop an item from the gray stack. blackenObject may push more objects
     // onto the gray stack while it runs.
-    Obj* obj = vm->gray.back();
-    vm->gray.pop_back();
-    blackenObject(vm, obj);
+    Obj* obj = this->gray.back();
+    this->gray.pop_back();
+    BlackenObject(obj);
   }
 }
 
-void wrenFreeObj(WrenVM* vm, Obj* obj)
+void WrenVM::FreeObj(Obj* obj)
 {
 #if WREN_DEBUG_TRACE_MEMORY
   printf("free ");
@@ -1179,8 +1179,8 @@ void wrenFreeObj(WrenVM* vm, Obj* obj)
     case OBJ_FIBER:
     {
       ObjFiber* fiber = (ObjFiber*)obj;
-      DEALLOCATE(vm, fiber->frames);
-      DEALLOCATE(vm, fiber->stack);
+      DEALLOCATE(this, fiber->frames);
+      DEALLOCATE(this, fiber->stack);
       break;
     }
       
@@ -1192,16 +1192,16 @@ void wrenFreeObj(WrenVM* vm, Obj* obj)
       fn->debug->sourceLines = {};
       for (int i = 0; i < fn->debug->localNames.size(); i++)
       {
-        DEALLOCATE(vm, fn->debug->localNames[i].name);
+        DEALLOCATE(this, fn->debug->localNames[i].name);
       }
       fn->debug->localNames = {};
-      DEALLOCATE(vm, fn->debug->name);
-      DEALLOCATE(vm, fn->debug);
+      DEALLOCATE(this, fn->debug->name);
+      DEALLOCATE(this, fn->debug);
       break;
     }
 
     case OBJ_FOREIGN:
-      vm->FinalizeForeign( (ObjForeign*)obj);
+      this->FinalizeForeign( (ObjForeign*)obj);
       break;
 
     case OBJ_LIST:
@@ -1209,11 +1209,11 @@ void wrenFreeObj(WrenVM* vm, Obj* obj)
       break;
 
     case OBJ_MAP:
-      DEALLOCATE(vm, ((ObjMap*)obj)->entries);
+      DEALLOCATE(this, ((ObjMap*)obj)->entries);
       break;
 
     case OBJ_MODULE:
-      ((ObjModule*)obj)->variableNames.clear(vm);
+      ((ObjModule*)obj)->variableNames.clear(this);
       ((ObjModule*)obj)->variables = {};
       break;
 
@@ -1225,12 +1225,12 @@ void wrenFreeObj(WrenVM* vm, Obj* obj)
       break;
   }
 
-  DEALLOCATE(vm, obj);
+  DEALLOCATE(this, obj);
 }
 
-ObjClass* wrenGetClass(WrenVM* vm, Value value)
+ObjClass* WrenVM::GetClass(Value value)
 {
-  return vm->GetClassInline( value);
+  return this->GetClassInline( value);
 }
 
 bool wrenValuesEqual(Value a, Value b)

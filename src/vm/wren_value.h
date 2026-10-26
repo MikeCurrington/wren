@@ -95,7 +95,7 @@ void* wrenReallocate(WrenVM* vm, void* memory, size_t oldSize, size_t newSize);
 // Creates a new string object from [text], which should be a bare C string
 // literal. This determines the length of the string automatically at compile
 // time based on the size of the character array (-1 for the terminating '\0').
-#define CONST_STRING(vm, text) wrenNewStringLength((vm), (text), sizeof(text) - 1)
+#define CONST_STRING(vm, text) (vm)->NewStringLength((text), sizeof(text) - 1)
 
 // Identifies which specific type a heap-allocated object is.
 typedef enum {
@@ -717,25 +717,10 @@ struct ObjRange : public Obj
 
 #endif
 
-// Creates a new "raw" class. It has no metaclass or superclass whatsoever.
-// This is only used for bootstrapping the initial Object and Class classes,
-// which are a little special.
-ObjClass* wrenNewSingleClass(WrenVM* vm, int numFields, ObjString* name);
-
-// Makes [superclass] the superclass of [subclass], and causes subclass to
-// inherit its methods. This should be called before any methods are defined
-// on subclass.
-void wrenBindSuperclass(WrenVM* vm, ObjClass* subclass, ObjClass* superclass);
-
-// Creates a new class object as well as its associated metaclass.
-ObjClass* wrenNewClass(WrenVM* vm, ObjClass* superclass, int numFields,
-                       ObjString* name);
-
-void wrenBindMethod(WrenVM* vm, ObjClass* classObj, int symbol, Method method);
 
 // Adds a new [CallFrame] to [fiber] invoking [closure] whose stack starts at
 // [stackStart].
-static inline void wrenAppendCallFrame(WrenVM* vm, ObjFiber* fiber,
+static inline void wrenAppendCallFrame(ObjFiber* fiber,
                                        ObjClosure* closure, Value* stackStart)
 {
   // The caller should have ensured we already have enough capacity.
@@ -749,22 +734,10 @@ static inline void wrenAppendCallFrame(WrenVM* vm, ObjFiber* fiber,
   frame->debugLastOffset = -1;
 }
 
-// Ensures [fiber]'s stack has at least [needed] slots.
-void wrenEnsureStack(WrenVM* vm, ObjFiber* fiber, int needed);
-
 static inline bool wrenHasError(const ObjFiber* fiber)
 {
   return !IS_NULL(fiber->error);
 }
-
-void wrenFunctionBindName(WrenVM* vm, ObjFn* fn, const char* name, int length);
-
-// Inserts [value] in [list] at [index], shifting down the other elements.
-void wrenListInsert(WrenVM* vm, ObjList* list, Value value, uint32_t index);
-
-// Removes and returns the item at [index] from [list].
-Value wrenListRemoveAt(WrenVM* vm, ObjList* list, uint32_t index);
-
 
 // Validates that [arg] is a valid object for use as a map key. Returns true if
 // it is and returns false otherwise. Use validateKey usually, for a runtime error.
@@ -774,56 +747,6 @@ static inline bool wrenMapIsValidKey(Value arg);
 // Looks up [key] in [map]. If found, returns the value. Otherwise, returns
 // `UNDEFINED_VAL`.
 Value wrenMapGet(ObjMap* map, Value key);
-
-// Associates [key] with [value] in [map].
-void wrenMapSet(WrenVM* vm, ObjMap* map, Value key, Value value);
-
-void wrenMapClear(WrenVM* vm, ObjMap* map);
-
-// Removes [key] from [map], if present. Returns the value for the key if found
-// or `NULL_VAL` otherwise.
-Value wrenMapRemoveKey(WrenVM* vm, ObjMap* map, Value key);
-
-// Creates a new string object and copies [text] into it.
-//
-// [text] must be non-NULL.
-Value wrenNewString(WrenVM* vm, const char* text);
-
-// Creates a new string object of [length] and copies [text] into it.
-//
-// [text] may be NULL if [length] is zero.
-Value wrenNewStringLength(WrenVM* vm, const char* text, size_t length);
-
-// Creates a new string object by taking a range of characters from [source].
-// The range starts at [start], contains [count] bytes, and increments by
-// [step].
-Value wrenNewStringFromRange(WrenVM* vm, ObjString* source, int start,
-                             uint32_t count, int step);
-
-// Produces a string representation of [value].
-Value wrenNumToString(WrenVM* vm, double value);
-
-// Creates a new formatted string from [format] and any additional arguments
-// used in the format string.
-//
-// This is a very restricted flavor of formatting, intended only for internal
-// use by the VM. Two formatting characters are supported, each of which reads
-// the next argument as a certain type:
-//
-// $ - A C string.
-// @ - A Wren string object.
-Value wrenStringFormat(WrenVM* vm, const char* format, ...);
-
-// Creates a new string containing the UTF-8 encoding of [value].
-Value wrenStringFromCodePoint(WrenVM* vm, int value);
-
-// Creates a new string from the integer representation of a byte
-Value wrenStringFromByte(WrenVM* vm, uint8_t value);
-
-// Creates a new string containing the code point in [string] starting at byte
-// [index]. If [index] points into the middle of a UTF-8 sequence, returns an
-// empty string.
-Value wrenStringCodePointAt(WrenVM* vm, ObjString* string, uint32_t index);
 
 // Search for the first occurence of [needle] within [haystack] and returns its
 // zero-based offset. Returns `UINT32_MAX` if [haystack] does not contain
@@ -838,33 +761,6 @@ static inline bool wrenStringEqualsCString(const ObjString* a,
   return a->length == length && memcmp(a->value, b, length) == 0;
 }
 
-// Mark [obj] as reachable and still in use. This should only be called
-// during the sweep phase of a garbage collection.
-void wrenGrayObj(WrenVM* vm, Obj* obj);
-
-// Mark [value] as reachable and still in use. This should only be called
-// during the sweep phase of a garbage collection.
-void wrenGrayValue(WrenVM* vm, Value value);
-
-// Mark the values in [buffer] as reachable and still in use. This should only
-// be called during the sweep phase of a garbage collection.
-void wrenGrayBuffer(WrenVM* vm, ValueBuffer* buffer);
-
-// Processes every object in the gray stack until all reachable objects have
-// been marked. After that, all objects are either white (freeable) or black
-// (in use and fully traversed).
-void wrenBlackenObjects(WrenVM* vm);
-
-// Releases all memory owned by [obj], including [obj] itself.
-void wrenFreeObj(WrenVM* vm, Obj* obj);
-
-// Returns the class of [value].
-//
-// Unlike wrenGetClassInline in wren_vm.h, this is not inlined. Inlining helps
-// performance (significantly) in some cases, but degrades it in others. The
-// ones used by the implementation were chosen to give the best results in the
-// benchmarks.
-ObjClass* wrenGetClass(WrenVM* vm, Value value);
 
 // Returns true if [a] and [b] are strictly the same value. This is identity
 // for object values, and value equality for unboxed values.

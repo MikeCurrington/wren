@@ -512,7 +512,7 @@ static int addConstant(Compiler* compiler, Value constant)
     {
       compiler->constants = wrenConstruct<ObjMap>(compiler->parser->vm, 0);
     }
-    wrenMapSet(compiler->parser->vm, compiler->constants, constant,
+    compiler->parser->vm->MapSet( compiler->constants, constant,
                NUM_VAL(compiler->fn->constants.size() - 1));
   }
   else
@@ -866,7 +866,7 @@ static void readName(Parser* parser, TokenType type, char firstChar)
     }
   }
 
-  parser->next.value = wrenNewStringLength(parser->vm, string.data(),
+  parser->next.value = parser->vm->NewStringLength( string.data(),
                                            string.size());
 
   makeToken(parser, type);
@@ -985,7 +985,7 @@ static void readRawString(Parser* parser)
 
   count -= (offset > count) ? count : offset;
 
-  parser->next.value = wrenNewStringLength(parser->vm,
+  parser->next.value = parser->vm->NewStringLength(
                          string.data() + offset, count);
 
   makeToken(parser, type);
@@ -1063,7 +1063,7 @@ static void readString(Parser* parser)
     }
   }
 
-  parser->next.value = wrenNewStringLength(parser->vm,
+  parser->next.value = parser->vm->NewStringLength(
                                            string.data(), string.size());
 
   makeToken(parser, type);
@@ -1700,7 +1700,7 @@ static ObjFn* endCompiler(Compiler* compiler,
   // we can't rely on CODE_RETURN to tell us we're at the end.
   emitOp(compiler, CODE_END);
 
-  wrenFunctionBindName(compiler->parser->vm, compiler->fn,
+  compiler->parser->vm->FunctionBindName( compiler->fn,
                        debugName, debugNameLength);
   
   // In the function that contains this one, load the resulting function object.
@@ -3511,7 +3511,7 @@ static bool method(Compiler* compiler, Variable classVariable)
   if (isForeign)
   {
     // Define a constant for the signature.
-    emitConstant(compiler, wrenNewStringLength(compiler->parser->vm,
+    emitConstant(compiler, compiler->parser->vm->NewStringLength(
                                                fullSignature, length));
 
     // We don't need the function we started compiling in the parameter list
@@ -3552,7 +3552,7 @@ static void classDefinition(Compiler* compiler, bool isForeign)
   classVariable.index = declareNamedVariable(compiler);
   
   // Create shared class name value
-  Value classNameString = wrenNewStringLength(compiler->parser->vm,
+  Value classNameString = compiler->parser->vm->NewStringLength(
       compiler->parser->previous.start, compiler->parser->previous.length);
   
   // Create class name string to track method duplicates
@@ -3704,7 +3704,7 @@ static void import(Compiler* compiler)
 
     // Define a string constant for the original variable name.
     int sourceVariableConstant = addConstant(compiler,
-          wrenNewStringLength(compiler->parser->vm,
+          compiler->parser->vm->NewStringLength(
                         sourceVariableToken.start,
                         sourceVariableToken.length));
 
@@ -3939,17 +3939,17 @@ void wrenBindMethodCode(ObjClass* classObj, ObjFn* fn)
 
 void wrenMarkCompiler(WrenVM* vm, Compiler* compiler)
 {
-  wrenGrayValue(vm, compiler->parser->current.value);
-  wrenGrayValue(vm, compiler->parser->previous.value);
-  wrenGrayValue(vm, compiler->parser->next.value);
+  vm->GrayValue( compiler->parser->current.value);
+  vm->GrayValue( compiler->parser->previous.value);
+  vm->GrayValue( compiler->parser->next.value);
 
   // Walk up the parent chain to mark the outer compilers too. The VM only
   // tracks the innermost one.
   do
   {
-    wrenGrayObj(vm, (Obj*)compiler->fn);
-    wrenGrayObj(vm, (Obj*)compiler->constants);
-    wrenGrayObj(vm, (Obj*)compiler->attributes);
+    vm->GrayObj( (Obj*)compiler->fn);
+    vm->GrayObj( (Obj*)compiler->constants);
+    vm->GrayObj( (Obj*)compiler->attributes);
     
     if (compiler->enclosingClass != nullptr)
     {
@@ -3957,11 +3957,11 @@ void wrenMarkCompiler(WrenVM* vm, Compiler* compiler)
 
       if(compiler->enclosingClass->methodAttributes != nullptr) 
       {
-        wrenGrayObj(vm, (Obj*)compiler->enclosingClass->methodAttributes);
+        vm->GrayObj( (Obj*)compiler->enclosingClass->methodAttributes);
       }
       if(compiler->enclosingClass->classAttributes != nullptr) 
       {
-        wrenGrayObj(vm, (Obj*)compiler->enclosingClass->classAttributes);
+        vm->GrayObj( (Obj*)compiler->enclosingClass->classAttributes);
       }
     }
     
@@ -3979,7 +3979,7 @@ static void disallowAttributes(Compiler* compiler)
   if (compiler->numAttributes > 0)
   {
     error(compiler, "Attributes can only specified before a class or a method");
-    wrenMapClear(compiler->parser->vm, compiler->attributes);
+    compiler->parser->vm->MapClear( compiler->attributes);
     compiler->numAttributes = 0;
   }
 }
@@ -3998,7 +3998,7 @@ static void addToAttributeGroup(Compiler* compiler,
   if(IS_UNDEFINED(groupMapValue)) 
   {
     groupMapValue = OBJ_VAL(wrenConstruct<ObjMap>(vm, 0));
-    wrenMapSet(vm, compiler->attributes, group, groupMapValue);
+    vm->MapSet( compiler->attributes, group, groupMapValue);
   }
 
   //we store them as a map per so we can maintain duplicate keys 
@@ -4011,7 +4011,7 @@ static void addToAttributeGroup(Compiler* compiler,
   if(IS_UNDEFINED(keyItemsValue)) 
   {
     keyItemsValue = OBJ_VAL(wrenConstruct<ObjList>(vm, 0, 0));
-    wrenMapSet(vm, groupMap, key, keyItemsValue);
+    vm->MapSet( groupMap, key, keyItemsValue);
   }
 
   //keyItems.add(value)
@@ -4124,10 +4124,10 @@ static void copyAttributes(Compiler* compiler, ObjMap* into)
   {
     const MapEntry* attrEntry = &compiler->attributes->entries[attrIdx];
     if(IS_UNDEFINED(attrEntry->key)) continue;
-    wrenMapSet(vm, into, attrEntry->key, attrEntry->value);
+    vm->MapSet( into, attrEntry->key, attrEntry->value);
   }
   
-  wrenMapClear(vm, compiler->attributes);
+  vm->MapClear( compiler->attributes);
 }
 
 // Copy the current attributes stored in the compiler into the method specific
@@ -4163,8 +4163,8 @@ static void copyMethodAttributes(Compiler* compiler, bool isForeign,
   }
   
   // Store the method attributes in the class map
-  Value key = wrenNewStringLength(vm, fullSignatureWithPrefix, fullLength);
-  wrenMapSet(vm, compiler->enclosingClass->methodAttributes, key, OBJ_VAL(methodAttr));
+  Value key = vm->NewStringLength( fullSignatureWithPrefix, fullLength);
+  vm->MapSet( compiler->enclosingClass->methodAttributes, key, OBJ_VAL(methodAttr));
 
   vm->PopRoot();
 }

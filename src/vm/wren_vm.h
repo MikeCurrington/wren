@@ -310,6 +310,36 @@ public:
   int DefineVariable(ObjModule* module, const char* name, size_t length,
                      Value value, int* line);
 
+  // Object factories and value operations (wren_value.cpp).
+  ObjClass* NewSingleClass(int numFields, ObjString* name);
+  void BindSuperclass(ObjClass* subclass, ObjClass* superclass);
+  ObjClass* NewClass(ObjClass* superclass, int numFields, ObjString* name);
+  void AddMethod(ObjClass* classObj, int symbol, Method method);
+  void EnsureStack(ObjFiber* fiber, int needed);
+  void FunctionBindName(ObjFn* fn, const char* name, int length);
+  void ListInsert(ObjList* list, Value value, uint32_t index);
+  Value ListRemoveAt(ObjList* list, uint32_t index);
+  void MapSet(ObjMap* map, Value key, Value value);
+  void MapClear(ObjMap* map);
+  Value MapRemoveKey(ObjMap* map, Value key);
+  Value NewString(const char* text);
+  Value NewStringLength(const char* text, size_t length);
+  Value NewStringFromRange(ObjString* source, int start, uint32_t count,
+                           int step);
+  Value NumToString(double value);
+  Value StringFormat(const char* format, ...);
+  Value StringFromCodePoint(int value);
+  Value StringFromByte(uint8_t value);
+  Value StringCodePointAt(ObjString* string, uint32_t index);
+  ObjClass* GetClass(Value value);
+
+  // Garbage collector (wren_value.cpp).
+  void GrayObj(Obj* obj);
+  void GrayValue(Value value);
+  void GrayBuffer(ValueBuffer* buffer);
+  void BlackenObjects();
+  void FreeObj(Obj* obj);
+
   // Invokes the finalizer for [foreign].
   void FinalizeForeign(ObjForeign* foreign);
 
@@ -402,6 +432,23 @@ private:
   Value GetModuleVariable(ObjModule* module, Value variableName);
   void ValidateApiSlot(int slot) const;
   void SetSlot(int slot, Value value);
+
+  // wren_value.cpp internals.
+  ObjString* AllocateString(size_t length);
+  void ResizeMap(ObjMap* map, uint32_t capacity);
+  void BlackenClass(ObjClass* classObj);
+  void BlackenClosure(ObjClosure* closure);
+  void BlackenFiber(ObjFiber* fiber);
+  void BlackenFn(ObjFn* fn);
+  void BlackenForeign(ObjForeign* foreign);
+  void BlackenInstance(ObjInstance* instance);
+  void BlackenList(ObjList* list);
+  void BlackenMap(ObjMap* map);
+  void BlackenModule(ObjModule* module);
+  void BlackenRange(ObjRange* range);
+  void BlackenString(ObjString* string);
+  void BlackenUpvalue(ObjUpvalue* upvalue);
+  void BlackenObject(Obj* obj);
 
   // The exported C API functions in wren.h, which forward to the private
   // members above.
@@ -626,9 +673,9 @@ inline void WrenVM::CallFunction(ObjFiber* fiber,
   // Grow the stack if needed.
   int stackSize = (int)(fiber->stackTop - fiber->stack);
   int needed = stackSize + closure->fn->maxSlots;
-  wrenEnsureStack(this, fiber, needed);
+  EnsureStack(fiber, needed);
   
-  wrenAppendCallFrame(this, fiber, closure, fiber->stackTop - numArgs);
+  wrenAppendCallFrame(fiber, closure, fiber->stackTop - numArgs);
 }
 
 // Closes any open upvalues that have been created for stack slots at [last]

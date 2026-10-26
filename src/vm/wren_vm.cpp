@@ -86,7 +86,7 @@ WrenVM::~WrenVM()
   while (obj != nullptr)
   {
     Obj* next = obj->next;
-    wrenFreeObj(this, obj);
+    FreeObj( obj);
     obj = next;
   }
 
@@ -271,16 +271,16 @@ void WrenVM::CollectGarbage()
   // already been freed.
   this->bytesAllocated = 0;
 
-  wrenGrayObj(this, (Obj*)this->modules);
+  GrayObj( (Obj*)this->modules);
 
   // Temporary roots.
   for (int i = 0; i < this->numTempRoots; i++)
   {
-    wrenGrayObj(this, this->tempRoots[i]);
+    GrayObj( this->tempRoots[i]);
   }
 
   // The current fiber.
-  wrenGrayObj(this, (Obj*)this->fiber);
+  GrayObj( (Obj*)this->fiber);
 
   // Fibers that are suspended in foreign methods waiting for nested calls to
   // complete. They are only reachable from the C stack, so the VM has to
@@ -290,7 +290,7 @@ void WrenVM::CollectGarbage()
        context != nullptr;
        context = context->prev)
   {
-    wrenGrayObj(this, (Obj*)context->fiber);
+    GrayObj( (Obj*)context->fiber);
   }
 
   // The handles.
@@ -298,7 +298,7 @@ void WrenVM::CollectGarbage()
        handle != nullptr;
        handle = handle->next)
   {
-    wrenGrayValue(this, handle->value);
+    GrayValue( handle->value);
   }
 
   // Any object the compiler is using (if there is one).
@@ -309,7 +309,7 @@ void WrenVM::CollectGarbage()
 
   // Now that we have grayed the roots, do a depth-first search over all of the
   // reachable objects.
-  wrenBlackenObjects(this);
+  BlackenObjects();
 
   // Collect the white objects.
   Obj** obj = &this->first;
@@ -320,7 +320,7 @@ void WrenVM::CollectGarbage()
       // This object wasn't reached, so remove it from the list and free it.
       Obj* unreached = *obj;
       *obj = unreached->next;
-      wrenFreeObj(this, unreached);
+      FreeObj( unreached);
     }
     else
     {
@@ -497,7 +497,7 @@ void WrenVM::BindMethod(int methodType, int symbol,
 
     if (method.as.foreign == nullptr)
     {
-      this->fiber->error = wrenStringFormat(this, 
+      this->fiber->error = StringFormat( 
           "Could not find foreign method '@' for class $ in module '$'.",
           methodValue, classObj->name->value, module->name->value);
       return;
@@ -512,7 +512,7 @@ void WrenVM::BindMethod(int methodType, int symbol,
     wrenBindMethodCode(classObj, method.as.closure->fn);
   }
 
-  wrenBindMethod(this, classObj, symbol, method);
+  AddMethod( classObj, symbol, method);
 }
 
 void WrenVM::CallForeign(ObjFiber* fiber,
@@ -589,7 +589,7 @@ void WrenVM::RuntimeError()
 // method with [symbol] on [classObj].
 void WrenVM::MethodNotFound(ObjClass* classObj, int symbol)
 {
-  this->fiber->error = wrenStringFormat(this, "@ does not implement '$'.",
+  this->fiber->error = StringFormat( "@ does not implement '$'.",
       OBJ_VAL(classObj->name), this->methodNames[symbol]->value);
 }
 
@@ -618,7 +618,7 @@ ObjClosure* WrenVM::CompileInModule(Value name, const char* source,
 
     // Store it in the VM's module registry so we don't load the same module
     // multiple times.
-    wrenMapSet(this, this->modules, name, OBJ_VAL(module));
+    MapSet( this->modules, name, OBJ_VAL(module));
 
     PopRoot();
 
@@ -663,7 +663,7 @@ Value WrenVM::ValidateSuperclass(Value name, Value superclassValue,
   // Make sure the superclass is a class.
   if (!IS_CLASS(superclassValue))
   {
-    return wrenStringFormat(this, 
+    return StringFormat( 
         "Class '@' cannot inherit from a non-class object.",
         name);
   }
@@ -683,28 +683,28 @@ Value WrenVM::ValidateSuperclass(Value name, Value superclassValue,
       superclass == this->nullClass ||
       superclass == this->numClass)
   {
-    return wrenStringFormat(this, 
+    return StringFormat( 
         "Class '@' cannot inherit from built-in class '@'.",
         name, OBJ_VAL(superclass->name));
   }
 
   if (superclass->numFields == -1)
   {
-    return wrenStringFormat(this, 
+    return StringFormat( 
         "Class '@' cannot inherit from foreign class '@'.",
         name, OBJ_VAL(superclass->name));
   }
 
   if (numFields == -1 && superclass->numFields > 0)
   {
-    return wrenStringFormat(this, 
+    return StringFormat( 
         "Foreign class '@' may not inherit from a class with fields.",
         name);
   }
 
   if (superclass->numFields + numFields > MAX_FIELDS)
   {
-    return wrenStringFormat(this, 
+    return StringFormat( 
         "Class '@' may not have more than 255 fields, including inherited "
         "ones.", name);
   }
@@ -740,7 +740,7 @@ void WrenVM::NewForeign(ObjClass* classObj, ObjModule* module)
   if (methods.allocate != nullptr)
   {
     method.as.foreign = methods.allocate;
-    wrenBindMethod(this, classObj, symbol, method);
+    AddMethod( classObj, symbol, method);
   }
   
   // Add the symbol even if there is no finalizer so we can ensure that the
@@ -749,7 +749,7 @@ void WrenVM::NewForeign(ObjClass* classObj, ObjModule* module)
   if (methods.finalize != nullptr)
   {
     method.as.foreign = (WrenForeignMethodFn)methods.finalize;
-    wrenBindMethod(this, classObj, symbol, method);
+    AddMethod( classObj, symbol, method);
   }
 }
 
@@ -794,7 +794,7 @@ void WrenVM::CreateClass(int numFields, ObjModule* module)
   this->fiber->error = ValidateSuperclass(name, superclass, numFields);
   if (wrenHasError(this->fiber)) return;
 
-  ObjClass* classObj = wrenNewClass(this, AS_CLASS(superclass), numFields,
+  ObjClass* classObj = NewClass( AS_CLASS(superclass), numFields,
                                     AS_STRING(name));
   this->fiber->stackTop[-1] = OBJ_VAL(classObj);
 
@@ -867,7 +867,7 @@ Value WrenVM::ResolveModuleName(Value name)
       std::string_view(AS_STRING(name)->value, AS_STRING(name)->length));
   if (!resolved)
   {
-    this->fiber->error = wrenStringFormat(this, 
+    this->fiber->error = StringFormat( 
         "Could not resolve module '@' imported from '@'.",
         name, OBJ_VAL(importer));
     return NULL_VAL;
@@ -881,7 +881,7 @@ Value WrenVM::ResolveModuleName(Value name)
   }
 
   // Copy the string into a Wren String object.
-  return wrenNewStringLength(this, resolved->data(), resolved->size());
+  return NewStringLength( resolved->data(), resolved->size());
 }
 
 Value WrenVM::ImportModule(Value name)
@@ -914,7 +914,7 @@ Value WrenVM::ImportModule(Value name)
 
   if (source.empty())
   {
-    this->fiber->error = wrenStringFormat(this, "Could not load module '@'.", name);
+    this->fiber->error = StringFormat( "Could not load module '@'.", name);
     PopRoot(); // name.
     return NULL_VAL;
   }
@@ -923,7 +923,7 @@ Value WrenVM::ImportModule(Value name)
 
   if (moduleClosure == nullptr)
   {
-    this->fiber->error = wrenStringFormat(this, 
+    this->fiber->error = StringFormat( 
                                         "Could not compile module '@'.", name);
     PopRoot(); // name.
     return NULL_VAL;
@@ -949,7 +949,7 @@ Value WrenVM::GetModuleVariable(ObjModule* module,
     return module->variables[variableEntry];
   }
   
-  this->fiber->error = wrenStringFormat(this, 
+  this->fiber->error = StringFormat( 
       "Could not find a variable named '@' in module '@'.",
       variableName, OBJ_VAL(module->name));
   return NULL_VAL;
@@ -1626,7 +1626,7 @@ WrenHandle* WrenVM::MakeCallHandle(const char* signature)
   fn->code.push_back(CODE_RETURN);
   fn->code.push_back(CODE_END);
   fn->debug->sourceLines.insert(fn->debug->sourceLines.end(), 5, 0);
-  wrenFunctionBindName(this, fn, signature, signatureLength);
+  FunctionBindName( fn, signature, signatureLength);
 
   return value;
 }
@@ -1790,7 +1790,7 @@ ObjClosure* WrenVM::CompileSource(const char* module, const char* source,
   Value nameValue = NULL_VAL;
   if (module != nullptr)
   {
-    nameValue = wrenNewString(this, module);
+    nameValue = NewString( module);
     PushRoot(AS_OBJ(nameValue));
   }
   
@@ -1806,7 +1806,7 @@ Value WrenVM::GetModuleVariable(Value moduleName, Value variableName)
   ObjModule* module = GetModule(moduleName);
   if (module == nullptr)
   {
-    this->fiber->error = wrenStringFormat(this, "Module '@' is not loaded.",
+    this->fiber->error = StringFormat( "Module '@' is not loaded.",
                                         moduleName);
     return NULL_VAL;
   }
@@ -1906,7 +1906,7 @@ void WrenVM::EnsureSlots(int numSlots)
   
   // Grow the stack if needed.
   int needed = (int)(this->apiStack - this->fiber->stack) + numSlots;
-  wrenEnsureStack(this, this->fiber, needed);
+  EnsureStack( this->fiber, needed);
   
   // Initialize any newly exposed slots. The memory between the old stack top
   // and the new one is uninitialized, and since the garbage collector scans
@@ -2005,7 +2005,7 @@ void WrenVM::SetSlotBool(int slot, bool value)
 void WrenVM::SetSlotBytes(int slot, const char* bytes, size_t length)
 {
   ASSERT(bytes != nullptr, "Byte array cannot be NULL.");
-  SetSlot(slot, wrenNewStringLength(this, bytes, length));
+  SetSlot(slot, NewStringLength( bytes, length));
 }
 
 void WrenVM::SetSlotDouble(int slot, double value)
@@ -2047,7 +2047,7 @@ void WrenVM::SetSlotString(int slot, const char* text)
 {
   ASSERT(text != nullptr, "String cannot be NULL.");
   
-  SetSlot(slot, wrenNewString(this, text));
+  SetSlot(slot, NewString( text));
 }
 
 void WrenVM::SetSlotHandle(int slot, WrenHandle* handle)
@@ -2108,7 +2108,7 @@ void WrenVM::InsertInList(int listSlot, int index, int elementSlot)
   
   ASSERT(index <= list->elements.size(), "Index out of bounds.");
   
-  wrenListInsert(this, list, this->apiStack[elementSlot], index);
+  ListInsert( list, this->apiStack[elementSlot], index);
 }
 
 int WrenVM::GetMapCount(int slot)
@@ -2169,7 +2169,7 @@ void WrenVM::SetMapValue(int mapSlot, int keySlot, int valueSlot)
   Value value = this->apiStack[valueSlot];
   ObjMap* map = AS_MAP(this->apiStack[mapSlot]);
   
-  wrenMapSet(this, map, key, value);
+  MapSet( map, key, value);
 }
 
 void WrenVM::LookupVariable(const char* module, const char* name,
@@ -2178,7 +2178,7 @@ void WrenVM::LookupVariable(const char* module, const char* name,
   ASSERT(module != nullptr, "Module cannot be NULL.");
   ASSERT(name != nullptr, "Variable name cannot be NULL.");  
 
-  Value moduleName = wrenStringFormat(this, "$", module);
+  Value moduleName = StringFormat( "$", module);
   PushRoot(AS_OBJ(moduleName));
   
   ObjModule* moduleObj = GetModule(moduleName);
@@ -2198,7 +2198,7 @@ bool WrenVM::HasVariable(const char* module, const char* name)
   ASSERT(module != nullptr, "Module cannot be NULL.");
   ASSERT(name != nullptr, "Variable name cannot be NULL.");
 
-  Value moduleName = wrenStringFormat(this, "$", module);
+  Value moduleName = StringFormat( "$", module);
   PushRoot(AS_OBJ(moduleName));
 
   //We don't use wrenHasModule since we want to use the module object.
@@ -2217,7 +2217,7 @@ bool WrenVM::HasModule(const char* module)
 {
   ASSERT(module != nullptr, "Module cannot be NULL.");
   
-  Value moduleName = wrenStringFormat(this, "$", module);
+  Value moduleName = StringFormat( "$", module);
   PushRoot(AS_OBJ(moduleName));
 
   ObjModule* moduleObj = GetModule(moduleName);
@@ -2261,7 +2261,7 @@ void WrenVM::RemoveMapValue(int mapSlot, int keySlot, int removedValueSlot)
   }
 
   ObjMap* map = AS_MAP(apiStack[mapSlot]);
-  Value removed = wrenMapRemoveKey(this, map, key);
+  Value removed = MapRemoveKey( map, key);
   SetSlot(removedValueSlot, removed);
 }
 
