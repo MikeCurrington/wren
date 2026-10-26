@@ -1885,38 +1885,48 @@ void wrenPopRoot(WrenVM* vm)
   vm->numTempRoots--;
 }
 
+int WrenVM::slotCount() const
+{
+  if (apiStack == nullptr) return 0;
+
+  return (int)(fiber->stackTop - apiStack);
+}
+
 int wrenGetSlotCount(const WrenVM* vm)
 {
-  if (vm->apiStack == nullptr) return 0;
-  
-  return (int)(vm->fiber->stackTop - vm->apiStack);
+  return vm->slotCount();
+}
+
+void WrenVM::ensureSlots(int numSlots)
+{
+  // If we don't have a fiber accessible, create one for the API to use.
+  if (apiStack == nullptr)
+  {
+    fiber = wrenConstruct<ObjFiber>(this, 0, nullptr);
+    apiStack = fiber->stack;
+  }
+
+  int currentSize = (int)(fiber->stackTop - apiStack);
+  if (currentSize >= numSlots) return;
+
+  // Grow the stack if needed.
+  int needed = (int)(apiStack - fiber->stack) + numSlots;
+  wrenEnsureStack(this, fiber, needed);
+
+  // Initialize any newly exposed slots. The memory between the old stack top
+  // and the new one is uninitialized, and since the garbage collector scans
+  // every slot up to stackTop, garbage there can crash the GC.
+  for (Value* slot = fiber->stackTop; slot < apiStack + numSlots; slot++)
+  {
+    *slot = NULL_VAL;
+  }
+
+  fiber->stackTop = apiStack + numSlots;
 }
 
 void wrenEnsureSlots(WrenVM* vm, int numSlots)
 {
-  // If we don't have a fiber accessible, create one for the API to use.
-  if (vm->apiStack == nullptr)
-  {
-    vm->fiber = wrenConstruct<ObjFiber>(vm, 0, nullptr);
-    vm->apiStack = vm->fiber->stack;
-  }
-  
-  int currentSize = (int)(vm->fiber->stackTop - vm->apiStack);
-  if (currentSize >= numSlots) return;
-  
-  // Grow the stack if needed.
-  int needed = (int)(vm->apiStack - vm->fiber->stack) + numSlots;
-  wrenEnsureStack(vm, vm->fiber, needed);
-  
-  // Initialize any newly exposed slots. The memory between the old stack top
-  // and the new one is uninitialized, and since the garbage collector scans
-  // every slot up to stackTop, garbage there can crash the GC.
-  for (Value* slot = vm->fiber->stackTop; slot < vm->apiStack + numSlots; slot++)
-  {
-    *slot = NULL_VAL;
-  }
-  
-  vm->fiber->stackTop = vm->apiStack + numSlots;
+  vm->ensureSlots(numSlots);
 }
 
 // Ensures that [slot] is a valid index into the API's stack of slots.
@@ -1927,67 +1937,102 @@ static void validateApiSlot(const WrenVM* vm, int slot)
 }
 
 // Gets the type of the object in [slot].
+WrenType WrenVM::slotType(int slot) const
+{
+  validateApiSlot(this, slot);
+  if (IS_BOOL(apiStack[slot])) return WREN_TYPE_BOOL;
+  if (IS_NUM(apiStack[slot])) return WREN_TYPE_NUM;
+  if (IS_FOREIGN(apiStack[slot])) return WREN_TYPE_FOREIGN;
+  if (IS_LIST(apiStack[slot])) return WREN_TYPE_LIST;
+  if (IS_MAP(apiStack[slot])) return WREN_TYPE_MAP;
+  if (IS_NULL(apiStack[slot])) return WREN_TYPE_NULL;
+  if (IS_STRING(apiStack[slot])) return WREN_TYPE_STRING;
+
+  return WREN_TYPE_UNKNOWN;
+}
+
 WrenType wrenGetSlotType(const WrenVM* vm, int slot)
 {
-  validateApiSlot(vm, slot);
-  if (IS_BOOL(vm->apiStack[slot])) return WREN_TYPE_BOOL;
-  if (IS_NUM(vm->apiStack[slot])) return WREN_TYPE_NUM;
-  if (IS_FOREIGN(vm->apiStack[slot])) return WREN_TYPE_FOREIGN;
-  if (IS_LIST(vm->apiStack[slot])) return WREN_TYPE_LIST;
-  if (IS_MAP(vm->apiStack[slot])) return WREN_TYPE_MAP;
-  if (IS_NULL(vm->apiStack[slot])) return WREN_TYPE_NULL;
-  if (IS_STRING(vm->apiStack[slot])) return WREN_TYPE_STRING;
-  
-  return WREN_TYPE_UNKNOWN;
+  return vm->slotType(slot);
+}
+
+bool WrenVM::getSlotBool(int slot)
+{
+  validateApiSlot(this, slot);
+  ASSERT(IS_BOOL(apiStack[slot]), "Slot must hold a bool.");
+
+  return AS_BOOL(apiStack[slot]);
 }
 
 bool wrenGetSlotBool(WrenVM* vm, int slot)
 {
-  validateApiSlot(vm, slot);
-  ASSERT(IS_BOOL(vm->apiStack[slot]), "Slot must hold a bool.");
-
-  return AS_BOOL(vm->apiStack[slot]);
+  return vm->getSlotBool(slot);
 }
 
-const char* wrenGetSlotBytes(WrenVM* vm, int slot, int* length)
+const char* WrenVM::getSlotBytes(int slot, int* length)
 {
-  validateApiSlot(vm, slot);
-  ASSERT(IS_STRING(vm->apiStack[slot]), "Slot must hold a string.");
-  
-  ObjString* string = AS_STRING(vm->apiStack[slot]);
+  validateApiSlot(this, slot);
+  ASSERT(IS_STRING(apiStack[slot]), "Slot must hold a string.");
+
+  ObjString* string = AS_STRING(apiStack[slot]);
   *length = string->length;
   return string->value;
 }
 
+const char* wrenGetSlotBytes(WrenVM* vm, int slot, int* length)
+{
+  return vm->getSlotBytes(slot, length);
+}
+
+double WrenVM::getSlotDouble(int slot)
+{
+  validateApiSlot(this, slot);
+  ASSERT(IS_NUM(apiStack[slot]), "Slot must hold a number.");
+
+  return AS_NUM(apiStack[slot]);
+}
+
 double wrenGetSlotDouble(WrenVM* vm, int slot)
 {
-  validateApiSlot(vm, slot);
-  ASSERT(IS_NUM(vm->apiStack[slot]), "Slot must hold a number.");
+  return vm->getSlotDouble(slot);
+}
 
-  return AS_NUM(vm->apiStack[slot]);
+void* WrenVM::getSlotForeign(int slot)
+{
+  validateApiSlot(this, slot);
+  ASSERT(IS_FOREIGN(apiStack[slot]),
+         "Slot must hold a foreign instance.");
+
+  return AS_FOREIGN(apiStack[slot])->data;
 }
 
 void* wrenGetSlotForeign(WrenVM* vm, int slot)
 {
-  validateApiSlot(vm, slot);
-  ASSERT(IS_FOREIGN(vm->apiStack[slot]),
-         "Slot must hold a foreign instance.");
+  return vm->getSlotForeign(slot);
+}
 
-  return AS_FOREIGN(vm->apiStack[slot])->data;
+const char* WrenVM::getSlotString(int slot)
+{
+  validateApiSlot(this, slot);
+  ASSERT(IS_STRING(apiStack[slot]), "Slot must hold a string.");
+
+  return AS_CSTRING(apiStack[slot]);
 }
 
 const char* wrenGetSlotString(WrenVM* vm, int slot)
 {
-  validateApiSlot(vm, slot);
-  ASSERT(IS_STRING(vm->apiStack[slot]), "Slot must hold a string.");
+  return vm->getSlotString(slot);
+}
 
-  return AS_CSTRING(vm->apiStack[slot]);
+WrenHandle* WrenVM::getSlotHandle(int slot)
+{
+  validateApiSlot(this, slot);
+  return wrenMakeHandle(this, apiStack[slot]);
 }
 
 WrenHandle* wrenGetSlotHandle(WrenVM* vm, int slot)
 {
-  validateApiSlot(vm, slot);
-  return wrenMakeHandle(vm, vm->apiStack[slot]);
+  return vm->getSlotHandle(slot);
 }
 
 // Stores [value] in [slot] in the foreign call stack.
@@ -1997,196 +2042,287 @@ static void setSlot(WrenVM* vm, int slot, Value value)
   vm->apiStack[slot] = value;
 }
 
+void WrenVM::setSlotBool(int slot, bool value)
+{
+  setSlot(this, slot, BOOL_VAL(value));
+}
+
 void wrenSetSlotBool(WrenVM* vm, int slot, bool value)
 {
-  setSlot(vm, slot, BOOL_VAL(value));
+  vm->setSlotBool(slot, value);
+}
+
+void WrenVM::setSlotBytes(int slot, const char* bytes, size_t length)
+{
+  ASSERT(bytes != nullptr, "Byte array cannot be NULL.");
+  setSlot(this, slot, wrenNewStringLength(this, bytes, length));
 }
 
 void wrenSetSlotBytes(WrenVM* vm, int slot, const char* bytes, size_t length)
 {
-  ASSERT(bytes != nullptr, "Byte array cannot be NULL.");
-  setSlot(vm, slot, wrenNewStringLength(vm, bytes, length));
+  vm->setSlotBytes(slot, bytes, length);
+}
+
+void WrenVM::setSlotDouble(int slot, double value)
+{
+  setSlot(this, slot, NUM_VAL(value));
 }
 
 void wrenSetSlotDouble(WrenVM* vm, int slot, double value)
 {
-  setSlot(vm, slot, NUM_VAL(value));
+  vm->setSlotDouble(slot, value);
+}
+
+void* WrenVM::setSlotNewForeign(int slot, int classSlot, size_t size)
+{
+  validateApiSlot(this, slot);
+  validateApiSlot(this, classSlot);
+  ASSERT(IS_CLASS(apiStack[classSlot]), "Slot must hold a class.");
+
+  ObjClass* classObj = AS_CLASS(apiStack[classSlot]);
+  ASSERT(classObj->numFields == -1, "Class must be a foreign class.");
+
+  ObjForeign* foreign = wrenConstruct<ObjForeign>(this, size, classObj, size);
+  apiStack[slot] = OBJ_VAL(foreign);
+
+  return (void*)foreign->data;
 }
 
 void* wrenSetSlotNewForeign(WrenVM* vm, int slot, int classSlot, size_t size)
 {
-  validateApiSlot(vm, slot);
-  validateApiSlot(vm, classSlot);
-  ASSERT(IS_CLASS(vm->apiStack[classSlot]), "Slot must hold a class.");
-  
-  ObjClass* classObj = AS_CLASS(vm->apiStack[classSlot]);
-  ASSERT(classObj->numFields == -1, "Class must be a foreign class.");
-  
-  ObjForeign* foreign = wrenConstruct<ObjForeign>(vm, size, classObj, size);
-  vm->apiStack[slot] = OBJ_VAL(foreign);
-  
-  return (void*)foreign->data;
+  return vm->setSlotNewForeign(slot, classSlot, size);
+}
+
+void WrenVM::setSlotNewList(int slot)
+{
+  setSlot(this, slot, OBJ_VAL(wrenConstruct<ObjList>(this, 0, 0)));
 }
 
 void wrenSetSlotNewList(WrenVM* vm, int slot)
 {
-  setSlot(vm, slot, OBJ_VAL(wrenConstruct<ObjList>(vm, 0, 0)));
+  vm->setSlotNewList(slot);
+}
+
+void WrenVM::setSlotNewMap(int slot)
+{
+  setSlot(this, slot, OBJ_VAL(wrenConstruct<ObjMap>(this, 0)));
 }
 
 void wrenSetSlotNewMap(WrenVM* vm, int slot)
 {
-  setSlot(vm, slot, OBJ_VAL(wrenConstruct<ObjMap>(vm, 0)));
+  vm->setSlotNewMap(slot);
+}
+
+void WrenVM::setNull(int slot)
+{
+  setSlot(this, slot, NULL_VAL);
 }
 
 void wrenSetSlotNull(WrenVM* vm, int slot)
 {
-  setSlot(vm, slot, NULL_VAL);
+  vm->setNull(slot);
+}
+
+void WrenVM::setSlotString(int slot, const char* text)
+{
+  ASSERT(text != nullptr, "String cannot be NULL.");
+
+  setSlot(this, slot, wrenNewString(this, text));
 }
 
 void wrenSetSlotString(WrenVM* vm, int slot, const char* text)
 {
-  ASSERT(text != nullptr, "String cannot be NULL.");
-  
-  setSlot(vm, slot, wrenNewString(vm, text));
+  vm->setSlotString(slot, text);
+}
+
+void WrenVM::setSlotHandle(int slot, WrenHandle* handle)
+{
+  ASSERT(handle != nullptr, "Handle cannot be NULL.");
+
+  setSlot(this, slot, handle->value);
 }
 
 void wrenSetSlotHandle(WrenVM* vm, int slot, WrenHandle* handle)
 {
-  ASSERT(handle != nullptr, "Handle cannot be NULL.");
+  vm->setSlotHandle(slot, handle);
+}
 
-  setSlot(vm, slot, handle->value);
+int WrenVM::getListCount(int slot)
+{
+  validateApiSlot(this, slot);
+  ASSERT(IS_LIST(apiStack[slot]), "Slot must hold a list.");
+
+  ValueBuffer& elements = AS_LIST(apiStack[slot])->elements;
+  return elements.size();
 }
 
 int wrenGetListCount(WrenVM* vm, int slot)
 {
-  validateApiSlot(vm, slot);
-  ASSERT(IS_LIST(vm->apiStack[slot]), "Slot must hold a list.");
-  
-  ValueBuffer& elements = AS_LIST(vm->apiStack[slot])->elements;
-  return elements.size();
+  return vm->getListCount(slot);
 }
 
-void wrenGetListElement(WrenVM* vm, int listSlot, int index, int elementSlot)
+void WrenVM::getListElement(int listSlot, int index, int elementSlot)
 {
-  validateApiSlot(vm, listSlot);
-  validateApiSlot(vm, elementSlot);
-  ASSERT(IS_LIST(vm->apiStack[listSlot]), "Slot must hold a list.");
+  validateApiSlot(this, listSlot);
+  validateApiSlot(this, elementSlot);
+  ASSERT(IS_LIST(apiStack[listSlot]), "Slot must hold a list.");
 
-  ValueBuffer& elements = AS_LIST(vm->apiStack[listSlot])->elements;
+  ValueBuffer& elements = AS_LIST(apiStack[listSlot])->elements;
 
   uint32_t usedIndex = wrenValidateIndex(elements.size(), index);
   ASSERT(usedIndex != UINT32_MAX, "Index out of bounds.");
 
-  vm->apiStack[elementSlot] = elements[usedIndex];
+  apiStack[elementSlot] = elements[usedIndex];
+}
+
+void wrenGetListElement(WrenVM* vm, int listSlot, int index, int elementSlot)
+{
+  vm->getListElement(listSlot, index, elementSlot);
+}
+
+void WrenVM::setListElement(int listSlot, int index, int elementSlot)
+{
+  validateApiSlot(this, listSlot);
+  validateApiSlot(this, elementSlot);
+  ASSERT(IS_LIST(apiStack[listSlot]), "Slot must hold a list.");
+
+  ObjList* list = AS_LIST(apiStack[listSlot]);
+
+  uint32_t usedIndex = wrenValidateIndex(list->elements.size(), index);
+  ASSERT(usedIndex != UINT32_MAX, "Index out of bounds.");
+
+  list->elements[usedIndex] = apiStack[elementSlot];
 }
 
 void wrenSetListElement(WrenVM* vm, int listSlot, int index, int elementSlot)
 {
-  validateApiSlot(vm, listSlot);
-  validateApiSlot(vm, elementSlot);
-  ASSERT(IS_LIST(vm->apiStack[listSlot]), "Slot must hold a list.");
+  vm->setListElement(listSlot, index, elementSlot);
+}
 
-  ObjList* list = AS_LIST(vm->apiStack[listSlot]);
+void WrenVM::insertInList(int listSlot, int index, int elementSlot)
+{
+  validateApiSlot(this, listSlot);
+  validateApiSlot(this, elementSlot);
+  ASSERT(IS_LIST(apiStack[listSlot]), "Must insert into a list.");
 
-  uint32_t usedIndex = wrenValidateIndex(list->elements.size(), index);
-  ASSERT(usedIndex != UINT32_MAX, "Index out of bounds.");
-  
-  list->elements[usedIndex] = vm->apiStack[elementSlot];
+  ObjList* list = AS_LIST(apiStack[listSlot]);
+
+  // Negative indices count from the end.
+  // We don't use wrenValidateIndex here because insert allows 1 past the end.
+  if (index < 0) index = list->elements.size() + 1 + index;
+
+  ASSERT(index <= list->elements.size(), "Index out of bounds.");
+
+  wrenListInsert(this, list, apiStack[elementSlot], index);
 }
 
 void wrenInsertInList(WrenVM* vm, int listSlot, int index, int elementSlot)
 {
-  validateApiSlot(vm, listSlot);
-  validateApiSlot(vm, elementSlot);
-  ASSERT(IS_LIST(vm->apiStack[listSlot]), "Must insert into a list.");
-  
-  ObjList* list = AS_LIST(vm->apiStack[listSlot]);
-  
-  // Negative indices count from the end. 
-  // We don't use wrenValidateIndex here because insert allows 1 past the end.
-  if (index < 0) index = list->elements.size() + 1 + index;
-  
-  ASSERT(index <= list->elements.size(), "Index out of bounds.");
-  
-  wrenListInsert(vm, list, vm->apiStack[elementSlot], index);
+  vm->insertInList(listSlot, index, elementSlot);
+}
+
+int WrenVM::getMapCount(int slot)
+{
+  validateApiSlot(this, slot);
+  ASSERT(IS_MAP(apiStack[slot]), "Slot must hold a map.");
+
+  ObjMap* map = AS_MAP(apiStack[slot]);
+  return map->count;
 }
 
 int wrenGetMapCount(WrenVM* vm, int slot)
 {
-  validateApiSlot(vm, slot);
-  ASSERT(IS_MAP(vm->apiStack[slot]), "Slot must hold a map.");
-
-  ObjMap* map = AS_MAP(vm->apiStack[slot]);
-  return map->count;
+  return vm->getMapCount(slot);
 }
 
-bool wrenGetMapContainsKey(WrenVM* vm, int mapSlot, int keySlot)
+bool WrenVM::getMapContainsKey(int mapSlot, int keySlot)
 {
-  validateApiSlot(vm, mapSlot);
-  validateApiSlot(vm, keySlot);
-  ASSERT(IS_MAP(vm->apiStack[mapSlot]), "Slot must hold a map.");
+  validateApiSlot(this, mapSlot);
+  validateApiSlot(this, keySlot);
+  ASSERT(IS_MAP(apiStack[mapSlot]), "Slot must hold a map.");
 
-  Value key = vm->apiStack[keySlot];
+  Value key = apiStack[keySlot];
   ASSERT(wrenMapIsValidKey(key), "Key must be a value type");
-  if (!validateKey(vm, key)) return false;
+  if (!validateKey(this, key)) return false;
 
-  ObjMap* map = AS_MAP(vm->apiStack[mapSlot]);
+  ObjMap* map = AS_MAP(apiStack[mapSlot]);
   Value value = wrenMapGet(map, key);
 
   return !IS_UNDEFINED(value);
 }
 
-void wrenGetMapValue(WrenVM* vm, int mapSlot, int keySlot, int valueSlot)
+bool wrenGetMapContainsKey(WrenVM* vm, int mapSlot, int keySlot)
 {
-  validateApiSlot(vm, mapSlot);
-  validateApiSlot(vm, keySlot);
-  validateApiSlot(vm, valueSlot);
-  ASSERT(IS_MAP(vm->apiStack[mapSlot]), "Slot must hold a map.");
+  return vm->getMapContainsKey(mapSlot, keySlot);
+}
 
-  ObjMap* map = AS_MAP(vm->apiStack[mapSlot]);
-  Value value = wrenMapGet(map, vm->apiStack[keySlot]);
+void WrenVM::getMapValue(int mapSlot, int keySlot, int valueSlot)
+{
+  validateApiSlot(this, mapSlot);
+  validateApiSlot(this, keySlot);
+  validateApiSlot(this, valueSlot);
+  ASSERT(IS_MAP(apiStack[mapSlot]), "Slot must hold a map.");
+
+  ObjMap* map = AS_MAP(apiStack[mapSlot]);
+  Value value = wrenMapGet(map, apiStack[keySlot]);
   if (IS_UNDEFINED(value)) {
     value = NULL_VAL;
   }
 
-  vm->apiStack[valueSlot] = value;
+  apiStack[valueSlot] = value;
+}
+
+void wrenGetMapValue(WrenVM* vm, int mapSlot, int keySlot, int valueSlot)
+{
+  vm->getMapValue(mapSlot, keySlot, valueSlot);
+}
+
+void WrenVM::setMapValue(int mapSlot, int keySlot, int valueSlot)
+{
+  validateApiSlot(this, mapSlot);
+  validateApiSlot(this, keySlot);
+  validateApiSlot(this, valueSlot);
+  ASSERT(IS_MAP(apiStack[mapSlot]), "Must insert into a map.");
+
+  Value key = apiStack[keySlot];
+  ASSERT(wrenMapIsValidKey(key), "Key must be a value type");
+
+  if (!validateKey(this, key)) {
+    return;
+  }
+
+  Value value = apiStack[valueSlot];
+  ObjMap* map = AS_MAP(apiStack[mapSlot]);
+
+  wrenMapSet(this, map, key, value);
 }
 
 void wrenSetMapValue(WrenVM* vm, int mapSlot, int keySlot, int valueSlot)
 {
-  validateApiSlot(vm, mapSlot);
-  validateApiSlot(vm, keySlot);
-  validateApiSlot(vm, valueSlot);
-  ASSERT(IS_MAP(vm->apiStack[mapSlot]), "Must insert into a map.");
-  
-  Value key = vm->apiStack[keySlot];
-  ASSERT(wrenMapIsValidKey(key), "Key must be a value type");
-
-  if (!validateKey(vm, key)) {
-    return;
-  }
-
-  Value value = vm->apiStack[valueSlot];
-  ObjMap* map = AS_MAP(vm->apiStack[mapSlot]);
-  
-  wrenMapSet(vm, map, key, value);
+  vm->setMapValue(mapSlot, keySlot, valueSlot);
 }
 
-void wrenRemoveMapValue(WrenVM* vm, int mapSlot, int keySlot, 
-                        int removedValueSlot)
+void WrenVM::removeMapValue(int mapSlot, int keySlot,
+                            int removedValueSlot)
 {
-  validateApiSlot(vm, mapSlot);
-  validateApiSlot(vm, keySlot);
-  ASSERT(IS_MAP(vm->apiStack[mapSlot]), "Slot must hold a map.");
+  validateApiSlot(this, mapSlot);
+  validateApiSlot(this, keySlot);
+  ASSERT(IS_MAP(apiStack[mapSlot]), "Slot must hold a map.");
 
-  Value key = vm->apiStack[keySlot];
-  if (!validateKey(vm, key)) {
+  Value key = apiStack[keySlot];
+  if (!validateKey(this, key)) {
     return;
   }
 
-  ObjMap* map = AS_MAP(vm->apiStack[mapSlot]);
-  Value removed = wrenMapRemoveKey(vm, map, key);
-  setSlot(vm, removedValueSlot, removed);
+  ObjMap* map = AS_MAP(apiStack[mapSlot]);
+  Value removed = wrenMapRemoveKey(this, map, key);
+  setSlot(this, removedValueSlot, removed);
+}
+
+void wrenRemoveMapValue(WrenVM* vm, int mapSlot, int keySlot,
+                        int removedValueSlot)
+{
+  vm->removeMapValue(mapSlot, keySlot, removedValueSlot);
 }
 
 void wrenGetVariable(WrenVM* vm, const char* module, const char* name,

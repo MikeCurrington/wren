@@ -265,12 +265,79 @@ public:
   // Set a slot from an existing shared_ptr — shares ownership, no copy.
   template <typename T> void setShared(int slot, std::shared_ptr<T> ptr);
 
-  void setNull(int slot) { wrenSetSlotNull(this, slot); }
-  int slotCount() const { return wrenGetSlotCount(this); }
-  void ensureSlots(int n) { wrenEnsureSlots(this, n); }
-  WrenType slotType(int s) const { return wrenGetSlotType(this, s); }
+  void setNull(int slot);
+  int slotCount() const;
+  void ensureSlots(int numSlots);
+  WrenType slotType(int slot) const;
 
 private:
+  // ---------------------------------------------------------------------
+  // Bodies of the exported C API. Each wren*() function declared in wren.h
+  // is a one-line forwarder to a member here or to a public method above,
+  // which holds the real implementation.
+  // ---------------------------------------------------------------------
+
+  // Slots (wren.h): reading and writing slot values.
+  bool getSlotBool(int slot);
+  const char* getSlotBytes(int slot, int* length);
+  double getSlotDouble(int slot);
+  void* getSlotForeign(int slot);
+  const char* getSlotString(int slot);
+  WrenHandle* getSlotHandle(int slot);
+  void setSlotBool(int slot, bool value);
+  void setSlotBytes(int slot, const char* bytes, size_t length);
+  void setSlotDouble(int slot, double value);
+  void* setSlotNewForeign(int slot, int classSlot, size_t size);
+  void setSlotNewList(int slot);
+  void setSlotNewMap(int slot);
+  void setSlotString(int slot, const char* text);
+  void setSlotHandle(int slot, WrenHandle* handle);
+
+  // Slots (wren.h): list and map elements.
+  int getListCount(int slot);
+  void getListElement(int listSlot, int index, int elementSlot);
+  void setListElement(int listSlot, int index, int elementSlot);
+  void insertInList(int listSlot, int index, int elementSlot);
+  int getMapCount(int slot);
+  bool getMapContainsKey(int mapSlot, int keySlot);
+  void getMapValue(int mapSlot, int keySlot, int valueSlot);
+  void setMapValue(int mapSlot, int keySlot, int valueSlot);
+  void removeMapValue(int mapSlot, int keySlot, int removedValueSlot);
+
+  // The exported C API functions in wren.h, which forward to the private
+  // members above.
+  friend bool wrenGetSlotBool(WrenVM* vm, int slot);
+  friend const char* wrenGetSlotBytes(WrenVM* vm, int slot, int* length);
+  friend double wrenGetSlotDouble(WrenVM* vm, int slot);
+  friend void* wrenGetSlotForeign(WrenVM* vm, int slot);
+  friend const char* wrenGetSlotString(WrenVM* vm, int slot);
+  friend WrenHandle* wrenGetSlotHandle(WrenVM* vm, int slot);
+  friend void wrenSetSlotBool(WrenVM* vm, int slot, bool value);
+  friend void wrenSetSlotBytes(WrenVM* vm, int slot, const char* bytes,
+                               size_t length);
+  friend void wrenSetSlotDouble(WrenVM* vm, int slot, double value);
+  friend void* wrenSetSlotNewForeign(WrenVM* vm, int slot, int classSlot,
+                                     size_t size);
+  friend void wrenSetSlotNewList(WrenVM* vm, int slot);
+  friend void wrenSetSlotNewMap(WrenVM* vm, int slot);
+  friend void wrenSetSlotString(WrenVM* vm, int slot, const char* text);
+  friend void wrenSetSlotHandle(WrenVM* vm, int slot, WrenHandle* handle);
+  friend int wrenGetListCount(WrenVM* vm, int slot);
+  friend void wrenGetListElement(WrenVM* vm, int listSlot, int index,
+                                 int elementSlot);
+  friend void wrenSetListElement(WrenVM* vm, int listSlot, int index,
+                                 int elementSlot);
+  friend void wrenInsertInList(WrenVM* vm, int listSlot, int index,
+                               int elementSlot);
+  friend int wrenGetMapCount(WrenVM* vm, int slot);
+  friend bool wrenGetMapContainsKey(WrenVM* vm, int mapSlot, int keySlot);
+  friend void wrenGetMapValue(WrenVM* vm, int mapSlot, int keySlot,
+                              int valueSlot);
+  friend void wrenSetMapValue(WrenVM* vm, int mapSlot, int keySlot,
+                              int valueSlot);
+  friend void wrenRemoveMapValue(WrenVM* vm, int mapSlot, int keySlot,
+                                 int removedValueSlot);
+
   // ---------------------------------------------------------------------
   // State absorbed from the former wren::VM C++ wrapper. Only WrenVM's own
   // methods touch these.
