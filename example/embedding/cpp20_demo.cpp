@@ -49,7 +49,7 @@ int main() {
 
   // Register a module with a foreign class
   {
-    auto& math = vm.module("math");
+    auto& math = vm.Module("math");
     auto vec = math.klass<Vec3>("Vec3");
 
     // Constructors
@@ -100,7 +100,7 @@ System.print("v1 == v3: %(v1 == v3)")  // expect false
 System.print("v1 != v2: %(v1 != v2)")  // expect false
 )WREN";
 
-  auto result = vm.interpret("main", source);
+  auto result = vm.Interpret("main", source);
   if (result != WREN_RESULT_SUCCESS) {
     printf("Wren interpretation failed.\n");
     return 1;

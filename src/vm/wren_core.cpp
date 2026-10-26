@@ -1245,7 +1245,7 @@ DEF_PRIMITIVE(system_gc)
 
 DEF_PRIMITIVE(system_writeString)
 {
-  vm->write(AS_CSTRING(args[1]));
+  vm->Write(AS_CSTRING(args[1]));
 
   RETURN_VAL(args[1]);
 }

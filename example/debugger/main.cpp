@@ -39,14 +39,14 @@ namespace
   {
     explicit HostVM(HostState* state) : state_(state) {}
 
-    void write(const char* text) override
+    void Write(const char* text) override
     {
       fputs(text, stdout);
       fflush(stdout);
       state_->debugger->writeOutput(text);
     }
 
-    void error(WrenErrorType type, const char* module, int line,
+    void Error(WrenErrorType type, const char* module, int line,
                const char* message) override
     {
       if (type == WREN_ERROR_COMPILE)
@@ -63,7 +63,7 @@ namespace
       }
     }
 
-    std::string loadModule(std::string_view name) override
+    std::string LoadModule(std::string_view name) override
     {
       // Resolve [name] (a Wren import string) to a file next to the main
       // script: "util" or "./util" both resolve to <scriptDir>/util.wren.

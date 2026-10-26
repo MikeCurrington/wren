@@ -433,7 +433,7 @@ static void printError(Parser* parser, int line, const char* label,
   ObjString* module = parser->module->name;
   const char* module_name = module ? module->value : "<unknown>";
 
-  parser->vm->error(WREN_ERROR_COMPILE, module_name, line, message);
+  parser->vm->Error(WREN_ERROR_COMPILE, module_name, line, message);
 }
 
 // Outputs a lexical error.

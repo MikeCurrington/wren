@@ -98,13 +98,13 @@ struct TestVM : WrenVM
 {
   explicit TestVM(bool isAPITest);
 
-  void write(const char* text) override;
-  void error(WrenErrorType type, const char* module, int line,
+  void Write(const char* text) override;
+  void Error(WrenErrorType type, const char* module, int line,
              const char* message) override;
-  std::string loadModule(std::string_view module) override;
-  WrenForeignMethodFn bindForeignMethod(const char* module,
+  std::string LoadModule(std::string_view module) override;
+  WrenForeignMethodFn BindForeignMethod(const char* module,
       const char* className, bool isStatic, const char* signature) override;
-  WrenForeignClassMethods bindForeignClass(const char* module,
+  WrenForeignClassMethods BindForeignClass(const char* module,
                                            const char* className) override;
 
 private:

@@ -164,8 +164,8 @@ std::shared_ptr<Widget> Widget::root;
 struct PrintVM : wren::VM {
   using wren::VM::VM;
 
-  void write(const char* text) override { printf("%s", text); }
-  void error(WrenErrorType, const char* mod, int line, const char* msg) override {
+  void Write(const char* text) override { printf("%s", text); }
+  void Error(WrenErrorType, const char* mod, int line, const char* msg) override {
     fprintf(stderr, "[%s:%d] %s\n", mod ? mod : "?", line, msg);
   }
 };
@@ -179,7 +179,7 @@ int main() {
   // Test 1: Basic foreign class with default constructor
   {
     printf("Test 1: Basic foreign class with default constructor\n");
-    auto& math = vm.module("test_basic");
+    auto& math = vm.Module("test_basic");
     auto point = math.klass<PointDouble>("Point");
     point.ctor<>();
     point.func<&PointDouble::length>("length");
@@ -199,14 +199,14 @@ System.print("after setX: %(p.getX)")
 System.print("length after setX: %(p.length)")
 )WREN";
   
-  auto result = vm.interpret("test1", test1Source);
+  auto result = vm.Interpret("test1", test1Source);
   TEST_ASSERT(result == WREN_RESULT_SUCCESS, "Basic foreign class test");
   printf("\n");
   
   // Test 2: Foreign class with parameterized constructor
   {
     printf("Test 2: Foreign class with parameterized constructor\n");
-    auto& math = vm.module("test_constructor");
+    auto& math = vm.Module("test_constructor");
     auto point = math.klass<PointDouble>("Point");
     point.ctor<>();
     point.ctor<double, double, double>();
@@ -223,14 +223,14 @@ var p2 = Point.new(3.0, 4.0, 0.0)
 System.print("3-4-0 length: %(p2.length)")
 )WREN";
   
-  result = vm.interpret("test2", test2Source);
+  result = vm.Interpret("test2", test2Source);
   TEST_ASSERT(result == WREN_RESULT_SUCCESS, "Parameterized constructor test");
   printf("\n");
   
   // Test 3: Static methods
   {
     printf("Test 3: Static methods\n");
-    auto& math = vm.module("test_static");
+    auto& math = vm.Module("test_static");
     auto point = math.klass<PointDouble>("Point");
     point.ctor<>();
     point.funcStatic<&PointDouble::origin>("origin");
@@ -244,14 +244,14 @@ var p = Point.origin()
 System.print("origin length: %(p.length)")
 )WREN";
   
-  result = vm.interpret("test3", test3Source);
+  result = vm.Interpret("test3", test3Source);
   TEST_ASSERT(result == WREN_RESULT_SUCCESS, "Static methods test");
   printf("\n");
   
   // Test 4: Properties with getters and setters
   {
     printf("Test 4: Properties with getters and setters\n");
-    auto& math = vm.module("test_properties");
+    auto& math = vm.Module("test_properties");
     auto point = math.klass<PointDouble>("Point");
     point.ctor<>();
     point.prop<&PointDouble::getX, &PointDouble::setX>("x");
@@ -267,14 +267,14 @@ p.x = 5.0
 System.print("set x: %(p.x)")
 )WREN";
   
-  result = vm.interpret("test4", test4Source);
+  result = vm.Interpret("test4", test4Source);
   TEST_ASSERT(result == WREN_RESULT_SUCCESS, "Properties with getters and setters test");
   printf("\n");
   
   // Test 5: Read-only properties
   {
     printf("Test 5: Read-only properties\n");
-    auto& math = vm.module("test_readonly");
+    auto& math = vm.Module("test_readonly");
     auto point = math.klass<PointDouble>("Point");
     point.ctor<double, double, double>();
     point.propReadonly<&PointDouble::length>("length");
@@ -287,14 +287,14 @@ var p = Point.new(3.0, 4.0, 0.0)
 System.print("readonly length: %(p.length)")
 )WREN";
   
-  result = vm.interpret("test5", test5Source);
+  result = vm.Interpret("test5", test5Source);
   TEST_ASSERT(result == WREN_RESULT_SUCCESS, "Read-only properties test");
   printf("\n");
   
   // Test 6: String handling
   {
     printf("Test 6: String handling\n");
-    auto& social = vm.module("test_strings");
+    auto& social = vm.Module("test_strings");
     auto person = social.klass<Person>("Person");
     person.ctor<>();
     person.ctor<std::string, int>();
@@ -310,7 +310,7 @@ System.print(p.introduce())
 System.print("is adult: %(p.isAdult())")
 )WREN";
   
-  result = vm.interpret("test6", test6Source);
+  result = vm.Interpret("test6", test6Source);
   TEST_ASSERT(result == WREN_RESULT_SUCCESS, "String handling test");
   printf("\n");
   
@@ -319,7 +319,7 @@ System.print("is adult: %(p.isAdult())")
   
   {
     printf("Test 7: Finalizers\n");
-    auto& resMod = vm.module("test_finalizer");
+    auto& resMod = vm.Module("test_finalizer");
     auto resource = resMod.klass<TrackedResource>("Resource");
     resource.ctor<>();
     resource.ctor<int>();
@@ -339,11 +339,11 @@ import "test_finalizer" for Resource
 }
 )WREN";
   
-  result = vm.interpret("test7", test7Source);
+  result = vm.Interpret("test7", test7Source);
   
   // Force garbage collection to trigger finalizers
-  vm.collectGarbage();
-  vm.collectGarbage();
+  vm.CollectGarbage();
+  vm.CollectGarbage();
   
   TEST_ASSERT(result == WREN_RESULT_SUCCESS, "Finalizers execution test");
   TEST_ASSERT(TrackedResource::finalizeCount >= 2, "Finalizers called test");
@@ -352,7 +352,7 @@ import "test_finalizer" for Resource
   // Test 8: Multiple constructors
   {
     printf("Test 8: Multiple constructors\n");
-    auto& calcMod = vm.module("test_multiple_ctor");
+    auto& calcMod = vm.Module("test_multiple_ctor");
     auto calculator = calcMod.klass<Calculator>("Calculator");
     calculator.ctor<>();
     calculator.ctor<double>();
@@ -374,14 +374,14 @@ System.print("add: %(c2.add(3, 4))")
 System.print("multiply: %(c2.multiply(3, 4))")
 )WREN";
   
-  result = vm.interpret("test8", test8Source);
+  result = vm.Interpret("test8", test8Source);
   TEST_ASSERT(result == WREN_RESULT_SUCCESS, "Multiple constructors test");
   printf("\n");
   
   // Test 9: Static methods
   {
     printf("Test 9: Static methods\n");
-    auto& calcMod2 = vm.module("test_static_methods");
+    auto& calcMod2 = vm.Module("test_static_methods");
     auto calculator2 = calcMod2.klass<Calculator>("Calculator");
     calculator2.ctor<>();
     calculator2.funcStatic<&Calculator::pi>("pi");
@@ -393,14 +393,14 @@ import "test_static_methods" for Calculator
 System.print("pi: %(Calculator.pi())")
 )WREN";
   
-  result = vm.interpret("test9", test9Source);
+  result = vm.Interpret("test9", test9Source);
   TEST_ASSERT(result == WREN_RESULT_SUCCESS, "Static methods test");
   printf("\n");
   
   // Test 10: Passing foreign types as parameters
   {
     printf("Test 10: Passing foreign types as parameters\n");
-    auto& math = vm.module("test_foreign_params");
+    auto& math = vm.Module("test_foreign_params");
     auto point = math.klass<PointDouble>("Point");
     point.ctor<>();
     point.ctor<double, double, double>();
@@ -419,14 +419,14 @@ System.print("p2 length: %(p2.length)")
 System.print("distance: %(p1.distanceTo(p2))")
 )WREN";
 
-  result = vm.interpret("test10", test10Source);
+  result = vm.Interpret("test10", test10Source);
   TEST_ASSERT(result == WREN_RESULT_SUCCESS, "Foreign parameter passing test");
   printf("\n");
   
   // Test 11: PointFloat class (single precision)
   {
     printf("Test 11: PointFloat class (single precision)\n");
-    auto& floatMod = vm.module("test_float");
+    auto& floatMod = vm.Module("test_float");
     auto pointFloat = floatMod.klass<PointFloat>("PointFloat");
     pointFloat.ctor<>();
     pointFloat.ctor<float, float, float>();
@@ -458,7 +458,7 @@ var origin = PointFloat.origin()
 System.print("origin length: %(origin.length)")
 )WREN";
 
-  result = vm.interpret("test11", test11Source);
+  result = vm.Interpret("test11", test11Source);
   TEST_ASSERT(result == WREN_RESULT_SUCCESS, "PointFloat class test");
   printf("\n");
 
@@ -473,7 +473,7 @@ System.print("origin length: %(origin.length)")
   // Test 12: PointFloatExt class (use external functions to access a class)
   {
     printf("Test 12: PointInt class (integer point, but access through external functions)\n");
-    auto& floatMod = vm.module("test_int_ext");
+    auto& floatMod = vm.Module("test_int_ext");
     auto pointInt = floatMod.klass<PointInt>("PointInt");
     pointInt.ctor<>();
     pointInt.ctor<int, int, int>();
@@ -506,14 +506,14 @@ System.print("p1 x after x assignment: %(p1.getX)")
 // System.print("origin length: %(origin.length)")
 )WREN";
 
-  result = vm.interpret("test12", test12Source);
+  result = vm.Interpret("test12", test12Source);
   TEST_ASSERT(result == WREN_RESULT_SUCCESS, "External class test");
   printf("\n");
 
   // Test 13: foreign / shared_ptr return values
   {
     printf("Test 13: foreign and shared_ptr return values\n");
-    auto& mod = vm.module("test_returns");
+    auto& mod = vm.Module("test_returns");
     auto w = mod.klass<Widget>("Widget");
     w.func<&Widget::bump, int>("bump");
     w.func<&Widget::getChild>("getChild");
@@ -554,7 +554,7 @@ var fresh = Widget.make(42)
 System.print("fresh counter: %(fresh.counter)")
 )WREN";
 
-  result = vm.interpret("test13", test13Source);
+  result = vm.Interpret("test13", test13Source);
   TEST_ASSERT(result == WREN_RESULT_SUCCESS, "Foreign/shared_ptr returns test");
   TEST_ASSERT(sharedChild->counter == 12, "shared_ptr return shares ownership");
   TEST_ASSERT(Widget::root->counter == 1, "foreign by-value return is a copy");
@@ -575,8 +575,8 @@ System.print("fresh counter: %(fresh.counter)")
     // longer spins one up itself from Config.
     auto debugger = wren::debug::MakeDebugger();
     TEST_ASSERT(debugger != nullptr, "MakeDebugger returns a debugger");
-    TEST_ASSERT(debugger->attach(debugVm.raw(), debugPort), "debugger attach listens");
-    debugVm.setDebugger(std::move(debugger));
+    TEST_ASSERT(debugger->attach(debugVm.Raw(), debugPort), "debugger attach listens");
+    debugVm.SetDebugger(std::move(debugger));
 
     // Something must actually be serving on the port.
     int sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -591,7 +591,7 @@ System.print("fresh counter: %(fresh.counter)")
     TEST_ASSERT(listening, "debug port accepts connections");
 
     // Scripts must run normally with the debug hook installed.
-    auto& mod = debugVm.module("debug_test");
+    auto& mod = debugVm.Module("debug_test");
     mod.klass<Widget>("Widget").funcStatic<&Widget::make, int>("make")
         .func<&Widget::bump, int>("bump").varReadOnly<&Widget::counter>("counter");
     const char* debugSource = R"WREN(
@@ -600,12 +600,12 @@ var w = Widget.make(21)
 w.bump(21)
 System.print("bumped to %(w.counter)")
 )WREN";
-    WrenInterpretResult debugResult = debugVm.interpret("main", debugSource);
+    WrenInterpretResult debugResult = debugVm.Interpret("main", debugSource);
     TEST_ASSERT(debugResult == WREN_RESULT_SUCCESS, "interpret works with hook active");
 
     // Module path registration is accepted (no observable result; this just
     // exercises the passthrough).
-    debugVm.registerModulePath("main", "/tmp/debug_test_main.wren");
+    debugVm.RegisterModulePath("main", "/tmp/debug_test_main.wren");
 
     // Destructor detaches the hook before freeing the VM.
   }

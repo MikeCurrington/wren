@@ -352,12 +352,12 @@
     return config;
   }
 
-  void TestVM::write(const char* text)
+  void TestVM::Write(const char* text)
   {
     printf("%s", text);
   }
 
-  void TestVM::error(WrenErrorType type,
+  void TestVM::Error(WrenErrorType type,
     const char* module, int line, const char* message)
   {
     switch (type)
@@ -376,7 +376,7 @@
     }
   }
 
-  std::string TestVM::loadModule(std::string_view module)
+  std::string TestVM::LoadModule(std::string_view module)
   {
     #ifdef WREN_TRY
       return std::string();
@@ -396,14 +396,14 @@
     return result;
   }
 
-  WrenForeignMethodFn TestVM::bindForeignMethod(const char* module,
+  WrenForeignMethodFn TestVM::BindForeignMethod(const char* module,
       const char* className, bool isStatic, const char* signature)
   {
     if (!isAPITest_) return nullptr;
     return APITest_bindForeignMethod(this, module, className, isStatic, signature);
   }
 
-  WrenForeignClassMethods TestVM::bindForeignClass(const char* module,
+  WrenForeignClassMethods TestVM::BindForeignClass(const char* module,
                                                    const char* className)
   {
     WrenForeignClassMethods methods{nullptr, nullptr};

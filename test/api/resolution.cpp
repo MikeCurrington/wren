@@ -9,18 +9,18 @@ struct ResolutionVM : WrenVM
 {
   using WrenVM::WrenVM;
 
-  void write(const char* text) override
+  void Write(const char* text) override
   {
     printf("%s", text);
   }
 
-  void error(WrenErrorType type, const char* module, int line,
+  void Error(WrenErrorType type, const char* module, int line,
              const char* message) override
   {
     if (type == WREN_ERROR_RUNTIME) printf("%s\n", message);
   }
 
-  std::string loadModule(std::string_view module) override
+  std::string LoadModule(std::string_view module) override
   {
     printf("loading %s\n", std::string(module).c_str());
 
@@ -37,7 +37,7 @@ struct ReturnsNullVM : ResolutionVM
 {
   using ResolutionVM::ResolutionVM;
 
-  std::optional<std::string> resolveModule(std::string_view importer,
+  std::optional<std::string> ResolveModule(std::string_view importer,
                                            std::string_view name) override
   {
     return std::nullopt;
@@ -50,7 +50,7 @@ struct ChangeVM : ResolutionVM
 {
   using ResolutionVM::ResolutionVM;
 
-  std::optional<std::string> resolveModule(std::string_view importer,
+  std::optional<std::string> ResolveModule(std::string_view importer,
                                            std::string_view name) override
   {
     std::string result = std::string(importer) + "/" + std::string(name);

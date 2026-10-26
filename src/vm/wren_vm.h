@@ -126,7 +126,7 @@ public:
   // Displays a string of text to the user (System.print and friends). The
   // default discards the text, mirroring it to the attached debugger's
   // console (if any).
-  virtual void write(const char* text)
+  virtual void Write(const char* text)
   {
 #ifdef WREN_ENABLE_DEBUGGER
     if (debugger_) debugger_->writeOutput(text);
@@ -141,7 +141,7 @@ public:
   // and no module or line, followed by one WREN_ERROR_STACK_TRACE call per
   // stack frame. The default discards errors, mirroring them to the attached
   // debugger's console (if any).
-  virtual void error(WrenErrorType type, const char* module, int line,
+  virtual void Error(WrenErrorType type, const char* module, int line,
                      const char* message)
   {
 #ifdef WREN_ENABLE_DEBUGGER
@@ -172,19 +172,19 @@ public:
   // import. The default implements relative imports: a name starting with
   // "./" or "../" is resolved against the importing module's directory.
   // Return nullopt to report the import as a runtime error.
-  virtual std::optional<std::string> resolveModule(std::string_view importer,
+  virtual std::optional<std::string> ResolveModule(std::string_view importer,
                                                    std::string_view name);
 
   // Loads and returns the source code for the module [name], or an empty
   // string if the module is not found. This is only called the first time a
   // given module name is imported. The default serves the source generated
   // for modules registered through module().
-  virtual std::string loadModule(std::string_view name);
+  virtual std::string LoadModule(std::string_view name);
 
   // Returns a pointer to the foreign method for [signature] on [className]
   // in [module], or NULL if not found. The default looks up methods
   // registered through module()/Foreign<T>.
-  virtual WrenForeignMethodFn bindForeignMethod(const char* module,
+  virtual WrenForeignMethodFn BindForeignMethod(const char* module,
                                                 const char* className,
                                                 bool isStatic,
                                                 const char* signature);
@@ -192,13 +192,13 @@ public:
   // Returns the functions used to allocate and finalize instances of
   // [className] in [module]. The default looks up classes registered through
   // module()/Foreign<T>.
-  virtual WrenForeignClassMethods bindForeignClass(const char* module,
+  virtual WrenForeignClassMethods BindForeignClass(const char* module,
                                                    const char* className);
 
   // Invoked from the interpreter loop on each new source line when a debug
   // hook is in use. The default forwards to the hook installed with
   // wrenSetDebugHook(), which is how the debugger attaches.
-  virtual void onDebugEvent(WrenDebugEvent event)
+  virtual void OnDebugEvent(WrenDebugEvent event)
   {
     if (debugHook != nullptr) debugHook(this, event, debugHookData);
   }
@@ -209,12 +209,12 @@ public:
 
   // The raw WrenVM (this object; kept for source compatibility with the
   // former wren::VM wrapper).
-  WrenVM* raw() const { return const_cast<WrenVM*>(this); }
+  WrenVM* Raw() const { return const_cast<WrenVM*>(this); }
 
   // The VM's debugger, or nullptr.
-  wren::debug::Debugger* debugger() const { return debugger_.get(); }
+  wren::debug::Debugger* Debugger() const { return debugger_.get(); }
 
-  void setDebugger(std::unique_ptr<wren::debug::Debugger> debugger)
+  void SetDebugger(std::unique_ptr<wren::debug::Debugger> debugger)
   {
     debugger_ = std::move(debugger);
   }
@@ -223,7 +223,7 @@ public:
   // VS Code can map source files to module names for breakpoints. No-op
   // unless a debugger is attached. wren.hpp itself has no filesystem notion,
   // so file-loading hosts call this per module.
-  void registerModulePath(std::string_view module, std::string_view path)
+  void RegisterModulePath(std::string_view module, std::string_view path)
   {
     if (debugger_)
     {
@@ -233,160 +233,44 @@ public:
 
   // Accesses (creating if needed) the module named [name], whose foreign
   // classes can be registered through Foreign<T>. Defined in wren.hpp.
-  wren::Module& module(std::string name);
+  wren::Module& Module(std::string name);
 
-  WrenInterpretResult interpret(std::string_view mod, std::string_view src)
+  WrenInterpretResult Interpret(std::string_view mod, std::string_view src)
   {
-    return interpretSource(std::string(mod).c_str(), std::string(src).c_str());
+    return wrenInterpret(this, std::string(mod).c_str(), std::string(src).c_str());
   }
 
   // A RAII handle for calling a method with [sig]. Defined in wren.hpp.
-  wren::Handle callHandle(std::string_view sig);
+  wren::Handle CallHandle(std::string_view sig);
 
-  void getVariable(std::string_view mod, std::string_view name, int slot)
+  void GetVariable(std::string_view mod, std::string_view name, int slot)
   {
-    ensureSlots(slot + 1);
-    lookupVariable(std::string(mod).c_str(), std::string(name).c_str(), slot);
+    wrenEnsureSlots(this, slot + 1);
+    wrenGetVariable(this, std::string(mod).c_str(), std::string(name).c_str(), slot);
   }
 
-  void collectGarbage();
-  void* userData() const { return config.userData; }
-  void setUserData(void* data) { config.userData = data; }
+  void CollectGarbage() { wrenCollectGarbage(this); }
+  void* UserData() const { return wrenGetUserData(this); }
+  void SetUserData(void* data) { wrenSetUserData(this, data); }
 
   // Get a foreign object from a slot as a typed reference. Defined in
   // wren.hpp (needs the converters).
-  template <typename T> T get(int slot);
+  template <typename T> T Get(int slot);
   // Get a shared_ptr to a foreign object — enables C++ to keep the object
   // alive.
-  template <typename T> std::shared_ptr<T> getShared(int slot);
+  template <typename T> std::shared_ptr<T> GetShared(int slot);
   // Set a slot to a foreign object (copies/moves the value into a new
   // wrapper).
-  template <typename T> void set(int slot, T&& value);
+  template <typename T> void Set(int slot, T&& value);
   // Set a slot from an existing shared_ptr — shares ownership, no copy.
-  template <typename T> void setShared(int slot, std::shared_ptr<T> ptr);
+  template <typename T> void SetShared(int slot, std::shared_ptr<T> ptr);
 
-  void setNull(int slot);
-  int slotCount() const;
-  void ensureSlots(int numSlots);
-  WrenType slotType(int slot) const;
+  void SetNull(int slot) { wrenSetSlotNull(this, slot); }
+  int SlotCount() const { return wrenGetSlotCount(this); }
+  void EnsureSlots(int n) { wrenEnsureSlots(this, n); }
+  WrenType SlotType(int s) const { return wrenGetSlotType(this, s); }
 
 private:
-  // ---------------------------------------------------------------------
-  // Bodies of the exported C API. Each wren*() function declared in wren.h
-  // is a one-line forwarder to a member here or to a public method above,
-  // which holds the real implementation.
-  // ---------------------------------------------------------------------
-
-  // Slots (wren.h): reading and writing slot values.
-  bool getSlotBool(int slot);
-  const char* getSlotBytes(int slot, int* length);
-  double getSlotDouble(int slot);
-  void* getSlotForeign(int slot);
-  const char* getSlotString(int slot);
-  WrenHandle* getSlotHandle(int slot);
-  void setSlotBool(int slot, bool value);
-  void setSlotBytes(int slot, const char* bytes, size_t length);
-  void setSlotDouble(int slot, double value);
-  void* setSlotNewForeign(int slot, int classSlot, size_t size);
-  void setSlotNewList(int slot);
-  void setSlotNewMap(int slot);
-  void setSlotString(int slot, const char* text);
-  void setSlotHandle(int slot, WrenHandle* handle);
-
-  // Slots (wren.h): list and map elements.
-  int getListCount(int slot);
-  void getListElement(int listSlot, int index, int elementSlot);
-  void setListElement(int listSlot, int index, int elementSlot);
-  void insertInList(int listSlot, int index, int elementSlot);
-  int getMapCount(int slot);
-  bool getMapContainsKey(int mapSlot, int keySlot);
-  void getMapValue(int mapSlot, int keySlot, int valueSlot);
-  void setMapValue(int mapSlot, int keySlot, int valueSlot);
-  void removeMapValue(int mapSlot, int keySlot, int removedValueSlot);
-
-  // Execution, handles, and module variables (wren.h).
-  WrenInterpretResult interpretSource(const char* module, const char* source);
-  WrenHandle* makeCallHandle(const char* signature);
-  WrenInterpretResult call(WrenHandle* method);
-  void releaseHandle(WrenHandle* handle);
-  WrenCallContext* beginCall();
-  void endCall(WrenCallContext* context);
-  void abortFiber(int slot);
-  bool hasVariable(const char* module, const char* name);
-  bool hasModule(const char* module);
-  void lookupVariable(const char* module, const char* name, int slot);
-
-  // Debug API (wren.h; defined in wren_debug.cpp).
-  void setDebugHook(WrenDebugHookFn fn, void* userData);
-  int debugGetFrameCount();
-  bool debugGetFrameInfo(int frame, WrenDebugFrameInfo* info);
-  int debugGetLocalCount(int frame);
-  void debugGetLocal(int frame, int index, int slot);
-  const char* debugGetLocalName(int frame, int index);
-  int debugGetModuleVariableCount(int frame);
-  const char* debugGetModuleVariableName(int frame, int index);
-  void debugGetModuleVariable(int frame, int index, int slot);
-
-  // The exported C API functions in wren.h, which forward to the private
-  // members above.
-  friend bool wrenGetSlotBool(WrenVM* vm, int slot);
-  friend const char* wrenGetSlotBytes(WrenVM* vm, int slot, int* length);
-  friend double wrenGetSlotDouble(WrenVM* vm, int slot);
-  friend void* wrenGetSlotForeign(WrenVM* vm, int slot);
-  friend const char* wrenGetSlotString(WrenVM* vm, int slot);
-  friend WrenHandle* wrenGetSlotHandle(WrenVM* vm, int slot);
-  friend void wrenSetSlotBool(WrenVM* vm, int slot, bool value);
-  friend void wrenSetSlotBytes(WrenVM* vm, int slot, const char* bytes,
-                               size_t length);
-  friend void wrenSetSlotDouble(WrenVM* vm, int slot, double value);
-  friend void* wrenSetSlotNewForeign(WrenVM* vm, int slot, int classSlot,
-                                     size_t size);
-  friend void wrenSetSlotNewList(WrenVM* vm, int slot);
-  friend void wrenSetSlotNewMap(WrenVM* vm, int slot);
-  friend void wrenSetSlotString(WrenVM* vm, int slot, const char* text);
-  friend void wrenSetSlotHandle(WrenVM* vm, int slot, WrenHandle* handle);
-  friend int wrenGetListCount(WrenVM* vm, int slot);
-  friend void wrenGetListElement(WrenVM* vm, int listSlot, int index,
-                                 int elementSlot);
-  friend void wrenSetListElement(WrenVM* vm, int listSlot, int index,
-                                 int elementSlot);
-  friend void wrenInsertInList(WrenVM* vm, int listSlot, int index,
-                               int elementSlot);
-  friend int wrenGetMapCount(WrenVM* vm, int slot);
-  friend bool wrenGetMapContainsKey(WrenVM* vm, int mapSlot, int keySlot);
-  friend void wrenGetMapValue(WrenVM* vm, int mapSlot, int keySlot,
-                              int valueSlot);
-  friend void wrenSetMapValue(WrenVM* vm, int mapSlot, int keySlot,
-                              int valueSlot);
-  friend void wrenRemoveMapValue(WrenVM* vm, int mapSlot, int keySlot,
-                                 int removedValueSlot);
-  friend WrenInterpretResult wrenInterpret(WrenVM* vm, const char* module,
-                                           const char* source);
-  friend WrenHandle* wrenMakeCallHandle(WrenVM* vm, const char* signature);
-  friend WrenInterpretResult wrenCall(WrenVM* vm, WrenHandle* method);
-  friend void wrenReleaseHandle(WrenVM* vm, WrenHandle* handle);
-  friend WrenCallContext* wrenBeginCall(WrenVM* vm);
-  friend void wrenEndCall(WrenVM* vm, WrenCallContext* context);
-  friend void wrenAbortFiber(WrenVM* vm, int slot);
-  friend bool wrenHasVariable(WrenVM* vm, const char* module,
-                              const char* name);
-  friend bool wrenHasModule(WrenVM* vm, const char* module);
-  friend void wrenGetVariable(WrenVM* vm, const char* module,
-                              const char* name, int slot);
-  friend void wrenSetDebugHook(WrenVM* vm, WrenDebugHookFn fn,
-                               void* userData);
-  friend int wrenDebugGetFrameCount(WrenVM* vm);
-  friend bool wrenDebugGetFrameInfo(WrenVM* vm, int frame,
-                                    WrenDebugFrameInfo* info);
-  friend int wrenDebugGetLocalCount(WrenVM* vm, int frame);
-  friend void wrenDebugGetLocal(WrenVM* vm, int frame, int index, int slot);
-  friend const char* wrenDebugGetLocalName(WrenVM* vm, int frame, int index);
-  friend int wrenDebugGetModuleVariableCount(WrenVM* vm, int frame);
-  friend const char* wrenDebugGetModuleVariableName(WrenVM* vm, int frame,
-                                                    int index);
-  friend void wrenDebugGetModuleVariable(WrenVM* vm, int frame, int index,
-                                         int slot);
-
   // ---------------------------------------------------------------------
   // State absorbed from the former wren::VM C++ wrapper. Only WrenVM's own
   // methods touch these.
@@ -396,7 +280,7 @@ private:
   int debugPort = 4711;
 
   // Foreign classes and methods registered from C++ through module(). The
-  // default bindForeignMethod()/bindForeignClass()/loadModule()
+  // default BindForeignMethod()/BindForeignClass()/LoadModule()
   // implementations serve these. Module is defined in wren.hpp; it is only
   // complete where those are defined (wren.hpp / wren_vm.cpp).
   std::unordered_map<std::string, std::unique_ptr<wren::Module>> modules_;

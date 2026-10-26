@@ -758,28 +758,28 @@ Foreign<T>::~Foreign() {
 // (declared in wren_vm.h). Defined at global scope because WrenVM lives
 // there.
 // ===========================================================================
-inline wren::Module& WrenVM::module(std::string name) {
+inline wren::Module& WrenVM::Module(std::string name) {
   auto& m = modules_[name];
   if (!m) m = std::make_unique<wren::Module>(this, std::move(name));
   return *m;
 }
 
-inline wren::Handle WrenVM::callHandle(std::string_view sig) {
+inline wren::Handle WrenVM::CallHandle(std::string_view sig) {
   return wren::Handle(this, wrenMakeCallHandle(this, std::string(sig).c_str()));
 }
 
-template <typename T> inline T WrenVM::get(int slot) {
+template <typename T> inline T WrenVM::Get(int slot) {
   using D = std::decay_t<T>;
   if constexpr (wren::detail::isWrenBuiltin_v<D>) return wren::detail::Converter<D>::get(this, slot);
   else return wren::detail::getForeign<D>(this, slot);
 }
 
 template <typename T>
-inline std::shared_ptr<T> WrenVM::getShared(int slot) {
+inline std::shared_ptr<T> WrenVM::GetShared(int slot) {
   return wren::detail::getForeignShared<T>(this, slot);
 }
 
-template <typename T> inline void WrenVM::set(int slot, T&& value) {
+template <typename T> inline void WrenVM::Set(int slot, T&& value) {
   using D = std::decay_t<T>;
   if constexpr (wren::detail::isWrenBuiltin_v<D>) wren::detail::Converter<D>::set(this, slot, std::forward<T>(value));
   else {
@@ -789,7 +789,7 @@ template <typename T> inline void WrenVM::set(int slot, T&& value) {
 }
 
 template <typename T>
-inline void WrenVM::setShared(int slot, std::shared_ptr<T> ptr) {
+inline void WrenVM::SetShared(int slot, std::shared_ptr<T> ptr) {
   void* data = wrenSetSlotNewForeign(this, slot, slot, sizeof(wren::detail::ForeignWrapper));
   new (data) wren::detail::ForeignWrapper(wren::detail::ForeignWrapper::share<T>(std::move(ptr)));
 }
