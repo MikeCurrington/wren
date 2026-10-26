@@ -250,12 +250,12 @@ WrenForeignClassMethods WrenVM::bindForeignClass(const char* module,
   return methods;
 }
 
-void wrenCollectGarbage(WrenVM* vm)
+void WrenVM::collectGarbage()
 {
 #if WREN_DEBUG_TRACE_MEMORY || WREN_DEBUG_TRACE_GC
   printf("-- gc --\n");
 
-  size_t before = vm->bytesAllocated;
+  size_t before = bytesAllocated;
   double startTime = (double)clock() / CLOCKS_PER_SEC;
 #endif
 
@@ -269,50 +269,50 @@ void wrenCollectGarbage(WrenVM* vm)
   // know how much memory it is using. For example, when freeing an instance,
   // we need to know its class to know how big it is, but its class may have
   // already been freed.
-  vm->bytesAllocated = 0;
+  bytesAllocated = 0;
 
-  wrenGrayObj(vm, (Obj*)vm->modules);
+  wrenGrayObj(this, (Obj*)modules);
 
   // Temporary roots.
-  for (int i = 0; i < vm->numTempRoots; i++)
+  for (int i = 0; i < numTempRoots; i++)
   {
-    wrenGrayObj(vm, vm->tempRoots[i]);
+    wrenGrayObj(this, tempRoots[i]);
   }
 
   // The current fiber.
-  wrenGrayObj(vm, (Obj*)vm->fiber);
+  wrenGrayObj(this, (Obj*)fiber);
 
   // Fibers that are suspended in foreign methods waiting for nested calls to
   // complete. They are only reachable from the C stack, so the VM has to
   // track them explicitly or they (and the values on their stacks) would be
   // collected while the nested code runs.
-  for (WrenCallContext* context = vm->callContexts;
+  for (WrenCallContext* context = callContexts;
        context != nullptr;
        context = context->prev)
   {
-    wrenGrayObj(vm, (Obj*)context->fiber);
+    wrenGrayObj(this, (Obj*)context->fiber);
   }
 
   // The handles.
-  for (WrenHandle* handle = vm->handles;
+  for (WrenHandle* handle = handles;
        handle != nullptr;
        handle = handle->next)
   {
-    wrenGrayValue(vm, handle->value);
+    wrenGrayValue(this, handle->value);
   }
 
   // Any object the compiler is using (if there is one).
-  if (vm->compiler != nullptr) wrenMarkCompiler(vm, vm->compiler);
+  if (compiler != nullptr) wrenMarkCompiler(this, compiler);
 
   // Method names.
-  vm->methodNames.blacken(vm);
+  methodNames.blacken(this);
 
   // Now that we have grayed the roots, do a depth-first search over all of the
   // reachable objects.
-  wrenBlackenObjects(vm);
+  wrenBlackenObjects(this);
 
   // Collect the white objects.
-  Obj** obj = &vm->first;
+  Obj** obj = &first;
   while (*obj != nullptr)
   {
     if (!((*obj)->isDark))
@@ -320,7 +320,7 @@ void wrenCollectGarbage(WrenVM* vm)
       // This object wasn't reached, so remove it from the list and free it.
       Obj* unreached = *obj;
       *obj = unreached->next;
-      wrenFreeObj(vm, unreached);
+      wrenFreeObj(this, unreached);
     }
     else
     {
@@ -333,8 +333,8 @@ void wrenCollectGarbage(WrenVM* vm)
 
   // Calculate the next gc point, this is the current allocation plus
   // a configured percentage of the current allocation.
-  vm->nextGC = vm->bytesAllocated + ((vm->bytesAllocated * vm->config.heapGrowthPercent) / 100);
-  if (vm->nextGC < vm->config.minHeapSize) vm->nextGC = vm->config.minHeapSize;
+  nextGC = bytesAllocated + ((bytesAllocated * config.heapGrowthPercent) / 100);
+  if (nextGC < config.minHeapSize) nextGC = config.minHeapSize;
 
 #if WREN_DEBUG_TRACE_MEMORY || WREN_DEBUG_TRACE_GC
   double elapsed = ((double)clock() / CLOCKS_PER_SEC) - startTime;
@@ -342,11 +342,16 @@ void wrenCollectGarbage(WrenVM* vm)
   // we need a consistent type for the format string.
   printf("GC %lu before, %lu after (%lu collected), next at %lu. Took %.3fms.\n",
          (unsigned long)before,
-         (unsigned long)vm->bytesAllocated,
-         (unsigned long)(before - vm->bytesAllocated),
-         (unsigned long)vm->nextGC,
+         (unsigned long)bytesAllocated,
+         (unsigned long)(before - bytesAllocated),
+         (unsigned long)nextGC,
          elapsed*1000.0);
 #endif
+}
+
+void wrenCollectGarbage(WrenVM* vm)
+{
+  vm->collectGarbage();
 }
 
 void* wrenReallocate(WrenVM* vm, void* memory, size_t oldSize, size_t newSize)
@@ -1578,13 +1583,13 @@ static WrenInterpretResult runInterpreter(WrenVM* vm, ObjFiber* fiber)
   #undef READ_SHORT
 }
 
-WrenHandle* wrenMakeCallHandle(WrenVM* vm, const char* signature)
+WrenHandle* WrenVM::makeCallHandle(const char* signature)
 {
   ASSERT(signature != nullptr, "Signature cannot be NULL.");
-  
+
   int signatureLength = (int)strlen(signature);
   ASSERT(signatureLength > 0, "Signature cannot be empty.");
-  
+
   // Count the number parameters the method expects.
   int numParams = 0;
   if (signature[signatureLength - 1] == ')')
@@ -1594,7 +1599,7 @@ WrenHandle* wrenMakeCallHandle(WrenVM* vm, const char* signature)
       if (signature[i] == '_') numParams++;
     }
   }
-  
+
   // Count subscript arguments.
   if (signature[0] == '[')
   {
@@ -1603,63 +1608,72 @@ WrenHandle* wrenMakeCallHandle(WrenVM* vm, const char* signature)
       if (signature[i] == '_') numParams++;
     }
   }
-  
+
   // Add the signatue to the method table.
-  int method =  vm->methodNames.ensure(vm,
-                                      signature, signatureLength);
+  int method = methodNames.ensure(this, signature, signatureLength);
   ASSERT(method <= MAX_METHODS, "Method limit reached.");
-  
+
   // Create a little stub function that assumes the arguments are on the stack
   // and calls the method.
-  FnDebug* debug = wrenConstruct<FnDebug>(vm, 0);
-  ObjFn* fn = wrenConstruct<ObjFn>(vm, 0, nullptr, numParams + 1, debug);
-  
+  FnDebug* debug = wrenConstruct<FnDebug>(this, 0);
+  ObjFn* fn = wrenConstruct<ObjFn>(this, 0, nullptr, numParams + 1, debug);
+
   // Wrap the function in a closure and then in a handle. Do this here so it
   // doesn't get collected as we fill it in.
-  WrenHandle* value = wrenMakeHandle(vm, OBJ_VAL(fn));
+  WrenHandle* value = wrenMakeHandle(this, OBJ_VAL(fn));
   value->value = OBJ_VAL(wrenConstruct<ObjClosure>(
-      vm, sizeof(ObjUpvalue*) * fn->numUpvalues, fn));
-  
+      this, sizeof(ObjUpvalue*) * fn->numUpvalues, fn));
+
   fn->code.push_back((uint8_t)(CODE_CALL_0 + numParams));
   fn->code.push_back((method >> 8) & 0xff);
   fn->code.push_back(method & 0xff);
   fn->code.push_back(CODE_RETURN);
   fn->code.push_back(CODE_END);
   fn->debug->sourceLines.insert(fn->debug->sourceLines.end(), 5, 0);
-  wrenFunctionBindName(vm, fn, signature, signatureLength);
+  wrenFunctionBindName(this, fn, signature, signatureLength);
 
   return value;
 }
 
-WrenInterpretResult wrenCall(WrenVM* vm, WrenHandle* method)
+WrenHandle* wrenMakeCallHandle(WrenVM* vm, const char* signature)
+{
+  return vm->makeCallHandle(signature);
+}
+
+WrenInterpretResult WrenVM::call(WrenHandle* method)
 {
   ASSERT(method != nullptr, "Method cannot be NULL.");
   ASSERT(IS_CLOSURE(method->value), "Method must be a method handle.");
-  ASSERT(vm->fiber != nullptr, "Must set up arguments for call first.");
-  ASSERT(vm->apiStack != nullptr, "Must set up arguments for call first.");
-  ASSERT(vm->fiber->numFrames == 0, "Can not call from a foreign method.");
-  
+  ASSERT(fiber != nullptr, "Must set up arguments for call first.");
+  ASSERT(apiStack != nullptr, "Must set up arguments for call first.");
+  ASSERT(fiber->numFrames == 0, "Can not call from a foreign method.");
+
   ObjClosure* closure = AS_CLOSURE(method->value);
-  
-  ASSERT(vm->fiber->stackTop - vm->fiber->stack >= closure->fn->arity,
+
+  ASSERT(fiber->stackTop - fiber->stack >= closure->fn->arity,
          "Stack must have enough arguments for method.");
-  
+
   // Clear the API stack. Now that wrenCall() has control, we no longer need
   // it. All that matters is that the one return value is available at the end.
-  vm->apiStack = nullptr;
+  apiStack = nullptr;
 
   // Discard any extra temporary slots. We take for granted that the stub
   // function has exactly one slot for each argument.
-  vm->fiber->stackTop = &vm->fiber->stack[closure->fn->maxSlots];
-  
-  wrenCallFunction(vm, vm->fiber, closure, 0);
-  WrenInterpretResult result = runInterpreter(vm, vm->fiber);
-  
+  fiber->stackTop = &fiber->stack[closure->fn->maxSlots];
+
+  wrenCallFunction(this, fiber, closure, 0);
+  WrenInterpretResult result = runInterpreter(this, fiber);
+
   // If the call didn't abort, then set up the API stack to point to the
   // beginning of the stack so the host can access the call's return value.
-  if (vm->fiber != nullptr) vm->apiStack = vm->fiber->stack;
-  
+  if (fiber != nullptr) apiStack = fiber->stack;
+
   return result;
+}
+
+WrenInterpretResult wrenCall(WrenVM* vm, WrenHandle* method)
+{
+  return vm->call(method);
 }
 
 WrenCallContext::WrenCallContext(WrenVM* vm)
@@ -1681,9 +1695,9 @@ WrenHandle::WrenHandle(WrenVM* vm, Value _value)
   vm->handles = this;
 }
 
-WrenCallContext* wrenBeginCall(WrenVM* vm)
+WrenCallContext* WrenVM::beginCall()
 {
-  ASSERT(vm->apiStack != nullptr,
+  ASSERT(apiStack != nullptr,
          "Must be in a foreign method (or have set up slots) to begin a call.");
 
   // Remember the current slot region so that it can be restored when the
@@ -1692,7 +1706,7 @@ WrenCallContext* wrenBeginCall(WrenVM* vm)
   // other fiber -- and because this fiber is blocked in the foreign method
   // for the duration, this is the only chance we have to record it.
   WrenCallContext* context =
-      new (ALLOCATE(vm, WrenCallContext)) WrenCallContext(vm);
+      new (ALLOCATE(this, WrenCallContext)) WrenCallContext(this);
 
   // Create a fresh fiber to run the nested call in. Giving each nested call
   // its own fiber ensures that a Wren stack only ever has a single foreign
@@ -1702,29 +1716,39 @@ WrenCallContext* wrenBeginCall(WrenVM* vm)
   // The context links the suspended fiber into the VM so that the garbage
   // collector can find it and so that Wren code can detect that it can't be
   // resumed while the foreign method is still running.
-  ObjFiber* fiber = wrenConstruct<ObjFiber>(vm, 0, nullptr);
-  vm->fiber = fiber;
-  vm->apiStack = fiber->stack;
+  ObjFiber* fiber = wrenConstruct<ObjFiber>(this, 0, nullptr);
+  this->fiber = fiber;
+  apiStack = fiber->stack;
 
   return context;
 }
 
-void wrenEndCall(WrenVM* vm, WrenCallContext* context)
+WrenCallContext* wrenBeginCall(WrenVM* vm)
+{
+  return vm->beginCall();
+}
+
+void WrenVM::endCall(WrenCallContext* context)
 {
   ASSERT(context != nullptr, "Context cannot be NULL.");
-  ASSERT(vm->callContexts == context,
+  ASSERT(callContexts == context,
          "Must end nested calls in the reverse order they were begun.");
 
   // Unlink the context from the stack of nested calls.
-  vm->callContexts = context->prev;
+  callContexts = context->prev;
 
   // Restore the suspended fiber and its slot region. Since the fiber could
   // not be resumed while it was suspended in the foreign method, its stack
   // cannot have moved, so the saved base index still points to the same slot.
-  vm->fiber = context->fiber;
-  vm->apiStack = context->fiber->stack + context->apiStackBase;
+  fiber = context->fiber;
+  apiStack = context->fiber->stack + context->apiStackBase;
 
-  DEALLOCATE(vm, context);
+  DEALLOCATE(this, context);
+}
+
+void wrenEndCall(WrenVM* vm, WrenCallContext* context)
+{
+  vm->endCall(context);
 }
 
 WrenHandle* wrenMakeHandle(WrenVM* vm, Value value)
@@ -1740,12 +1764,12 @@ WrenHandle* wrenMakeHandle(WrenVM* vm, Value value)
   return handle;
 }
 
-void wrenReleaseHandle(WrenVM* vm, WrenHandle* handle)
+void WrenVM::releaseHandle(WrenHandle* handle)
 {
   ASSERT(handle != nullptr, "Handle cannot be NULL.");
 
   // Update the VM's head pointer if we're releasing the first handle.
-  if (vm->handles == handle) vm->handles = handle->next;
+  if (handles == handle) handles = handle->next;
 
   // Unlink it from the list.
   if (handle->prev != nullptr) handle->prev->next = handle->next;
@@ -1756,32 +1780,43 @@ void wrenReleaseHandle(WrenVM* vm, WrenHandle* handle)
   handle->prev = nullptr;
   handle->next = nullptr;
   handle->value = NULL_VAL;
-  DEALLOCATE(vm, handle);
+  DEALLOCATE(this, handle);
 }
 
-WrenInterpretResult wrenInterpret(WrenVM* vm, const char* module,
-                                  const char* source)
+void wrenReleaseHandle(WrenVM* vm, WrenHandle* handle)
 {
-  ObjClosure* closure = wrenCompileSource(vm, module, source, false, true);
+  vm->releaseHandle(handle);
+}
+
+WrenInterpretResult WrenVM::interpretSource(const char* module,
+                                            const char* source)
+{
+  ObjClosure* closure = wrenCompileSource(this, module, source, false, true);
   if (closure == nullptr) return WREN_RESULT_COMPILE_ERROR;
-  
-  wrenPushRoot(vm, (Obj*)closure);
-  ObjFiber* fiber = wrenConstruct<ObjFiber>(vm, 0, closure);
-  wrenPopRoot(vm); // closure.
+
+  wrenPushRoot(this, (Obj*)closure);
+  ObjFiber* fiber = wrenConstruct<ObjFiber>(this, 0, closure);
+  wrenPopRoot(this); // closure.
 
   // If this is a re-entrant call from inside a foreign method, suspend the
   // foreign method's slots for the duration. wrenInterpret() doesn't use the
   // API slots itself, but suspending them keeps the foreign method's fiber
   // alive and prevents Wren code from resuming it while the source runs.
   WrenCallContext* context =
-      vm->apiStack != nullptr ? wrenBeginCall(vm) : nullptr;
-  vm->apiStack = nullptr;
+      apiStack != nullptr ? beginCall() : nullptr;
+  apiStack = nullptr;
 
-  WrenInterpretResult result = runInterpreter(vm, fiber);
+  WrenInterpretResult result = runInterpreter(this, fiber);
 
-  if (context != nullptr) wrenEndCall(vm, context);
+  if (context != nullptr) endCall(context);
 
   return result;
+}
+
+WrenInterpretResult wrenInterpret(WrenVM* vm, const char* module,
+                                  const char* source)
+{
+  return vm->interpretSource(module, source);
 }
 
 ObjClosure* wrenCompileSource(WrenVM* vm, const char* module, const char* source,
@@ -2325,40 +2360,45 @@ void wrenRemoveMapValue(WrenVM* vm, int mapSlot, int keySlot,
   vm->removeMapValue(mapSlot, keySlot, removedValueSlot);
 }
 
-void wrenGetVariable(WrenVM* vm, const char* module, const char* name,
-                     int slot)
-{
-  ASSERT(module != nullptr, "Module cannot be NULL.");
-  ASSERT(name != nullptr, "Variable name cannot be NULL.");  
-
-  Value moduleName = wrenStringFormat(vm, "$", module);
-  wrenPushRoot(vm, AS_OBJ(moduleName));
-  
-  ObjModule* moduleObj = getModule(vm, moduleName);
-  ASSERT(moduleObj != nullptr, "Could not find module.");
-  
-  wrenPopRoot(vm); // moduleName.
-
-  int variableSlot = moduleObj->variableNames.find(
-                                         name, strlen(name));
-  ASSERT(variableSlot != -1, "Could not find variable.");
-  
-  setSlot(vm, slot, moduleObj->variables[variableSlot]);
-}
-
-bool wrenHasVariable(WrenVM* vm, const char* module, const char* name)
+void WrenVM::lookupVariable(const char* module, const char* name, int slot)
 {
   ASSERT(module != nullptr, "Module cannot be NULL.");
   ASSERT(name != nullptr, "Variable name cannot be NULL.");
 
-  Value moduleName = wrenStringFormat(vm, "$", module);
-  wrenPushRoot(vm, AS_OBJ(moduleName));
+  Value moduleName = wrenStringFormat(this, "$", module);
+  wrenPushRoot(this, AS_OBJ(moduleName));
 
-  //We don't use wrenHasModule since we want to use the module object.
-  ObjModule* moduleObj = getModule(vm, moduleName);
+  ObjModule* moduleObj = getModule(this, moduleName);
   ASSERT(moduleObj != nullptr, "Could not find module.");
 
-  wrenPopRoot(vm); // moduleName.
+  wrenPopRoot(this); // moduleName.
+
+  int variableSlot = moduleObj->variableNames.find(
+                                         name, strlen(name));
+  ASSERT(variableSlot != -1, "Could not find variable.");
+
+  setSlot(this, slot, moduleObj->variables[variableSlot]);
+}
+
+void wrenGetVariable(WrenVM* vm, const char* module, const char* name,
+                     int slot)
+{
+  vm->lookupVariable(module, name, slot);
+}
+
+bool WrenVM::hasVariable(const char* module, const char* name)
+{
+  ASSERT(module != nullptr, "Module cannot be NULL.");
+  ASSERT(name != nullptr, "Variable name cannot be NULL.");
+
+  Value moduleName = wrenStringFormat(this, "$", module);
+  wrenPushRoot(this, AS_OBJ(moduleName));
+
+  //We don't use wrenHasModule since we want to use the module object.
+  ObjModule* moduleObj = getModule(this, moduleName);
+  ASSERT(moduleObj != nullptr, "Could not find module.");
+
+  wrenPopRoot(this); // moduleName.
 
   int variableSlot = moduleObj->variableNames.find(
     name, strlen(name));
@@ -2366,32 +2406,47 @@ bool wrenHasVariable(WrenVM* vm, const char* module, const char* name)
   return variableSlot != -1;
 }
 
-bool wrenHasModule(WrenVM* vm, const char* module)
+bool wrenHasVariable(WrenVM* vm, const char* module, const char* name)
+{
+  return vm->hasVariable(module, name);
+}
+
+bool WrenVM::hasModule(const char* module)
 {
   ASSERT(module != nullptr, "Module cannot be NULL.");
-  
-  Value moduleName = wrenStringFormat(vm, "$", module);
-  wrenPushRoot(vm, AS_OBJ(moduleName));
 
-  ObjModule* moduleObj = getModule(vm, moduleName);
-  
-  wrenPopRoot(vm); // moduleName.
+  Value moduleName = wrenStringFormat(this, "$", module);
+  wrenPushRoot(this, AS_OBJ(moduleName));
+
+  ObjModule* moduleObj = getModule(this, moduleName);
+
+  wrenPopRoot(this); // moduleName.
 
   return moduleObj != nullptr;
 }
 
+bool wrenHasModule(WrenVM* vm, const char* module)
+{
+  return vm->hasModule(module);
+}
+
+void WrenVM::abortFiber(int slot)
+{
+  validateApiSlot(this, slot);
+  fiber->error = apiStack[slot];
+}
+
 void wrenAbortFiber(WrenVM* vm, int slot)
 {
-  validateApiSlot(vm, slot);
-  vm->fiber->error = vm->apiStack[slot];
+  vm->abortFiber(slot);
 }
 
 void* wrenGetUserData(const WrenVM* vm)
 {
-	return vm->config.userData;
+  return vm->userData();
 }
 
 void wrenSetUserData(WrenVM* vm, void* userData)
 {
-	vm->config.userData = userData;
+  vm->setUserData(userData);
 }

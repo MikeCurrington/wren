@@ -237,7 +237,7 @@ public:
 
   WrenInterpretResult interpret(std::string_view mod, std::string_view src)
   {
-    return wrenInterpret(this, std::string(mod).c_str(), std::string(src).c_str());
+    return interpretSource(std::string(mod).c_str(), std::string(src).c_str());
   }
 
   // A RAII handle for calling a method with [sig]. Defined in wren.hpp.
@@ -245,13 +245,13 @@ public:
 
   void getVariable(std::string_view mod, std::string_view name, int slot)
   {
-    wrenEnsureSlots(this, slot + 1);
-    wrenGetVariable(this, std::string(mod).c_str(), std::string(name).c_str(), slot);
+    ensureSlots(slot + 1);
+    lookupVariable(std::string(mod).c_str(), std::string(name).c_str(), slot);
   }
 
-  void collectGarbage() { wrenCollectGarbage(this); }
-  void* userData() const { return wrenGetUserData(this); }
-  void setUserData(void* data) { wrenSetUserData(this, data); }
+  void collectGarbage();
+  void* userData() const { return config.userData; }
+  void setUserData(void* data) { config.userData = data; }
 
   // Get a foreign object from a slot as a typed reference. Defined in
   // wren.hpp (needs the converters).
@@ -304,6 +304,18 @@ private:
   void setMapValue(int mapSlot, int keySlot, int valueSlot);
   void removeMapValue(int mapSlot, int keySlot, int removedValueSlot);
 
+  // Execution, handles, and module variables (wren.h).
+  WrenInterpretResult interpretSource(const char* module, const char* source);
+  WrenHandle* makeCallHandle(const char* signature);
+  WrenInterpretResult call(WrenHandle* method);
+  void releaseHandle(WrenHandle* handle);
+  WrenCallContext* beginCall();
+  void endCall(WrenCallContext* context);
+  void abortFiber(int slot);
+  bool hasVariable(const char* module, const char* name);
+  bool hasModule(const char* module);
+  void lookupVariable(const char* module, const char* name, int slot);
+
   // The exported C API functions in wren.h, which forward to the private
   // members above.
   friend bool wrenGetSlotBool(WrenVM* vm, int slot);
@@ -337,6 +349,19 @@ private:
                               int valueSlot);
   friend void wrenRemoveMapValue(WrenVM* vm, int mapSlot, int keySlot,
                                  int removedValueSlot);
+  friend WrenInterpretResult wrenInterpret(WrenVM* vm, const char* module,
+                                           const char* source);
+  friend WrenHandle* wrenMakeCallHandle(WrenVM* vm, const char* signature);
+  friend WrenInterpretResult wrenCall(WrenVM* vm, WrenHandle* method);
+  friend void wrenReleaseHandle(WrenVM* vm, WrenHandle* handle);
+  friend WrenCallContext* wrenBeginCall(WrenVM* vm);
+  friend void wrenEndCall(WrenVM* vm, WrenCallContext* context);
+  friend void wrenAbortFiber(WrenVM* vm, int slot);
+  friend bool wrenHasVariable(WrenVM* vm, const char* module,
+                              const char* name);
+  friend bool wrenHasModule(WrenVM* vm, const char* module);
+  friend void wrenGetVariable(WrenVM* vm, const char* module,
+                              const char* name, int slot);
 
   // ---------------------------------------------------------------------
   // State absorbed from the former wren::VM C++ wrapper. Only WrenVM's own
