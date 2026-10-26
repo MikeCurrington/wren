@@ -316,6 +316,17 @@ private:
   bool hasModule(const char* module);
   void lookupVariable(const char* module, const char* name, int slot);
 
+  // Debug API (wren.h; defined in wren_debug.cpp).
+  void setDebugHook(WrenDebugHookFn fn, void* userData);
+  int debugGetFrameCount();
+  bool debugGetFrameInfo(int frame, WrenDebugFrameInfo* info);
+  int debugGetLocalCount(int frame);
+  void debugGetLocal(int frame, int index, int slot);
+  const char* debugGetLocalName(int frame, int index);
+  int debugGetModuleVariableCount(int frame);
+  const char* debugGetModuleVariableName(int frame, int index);
+  void debugGetModuleVariable(int frame, int index, int slot);
+
   // The exported C API functions in wren.h, which forward to the private
   // members above.
   friend bool wrenGetSlotBool(WrenVM* vm, int slot);
@@ -362,6 +373,19 @@ private:
   friend bool wrenHasModule(WrenVM* vm, const char* module);
   friend void wrenGetVariable(WrenVM* vm, const char* module,
                               const char* name, int slot);
+  friend void wrenSetDebugHook(WrenVM* vm, WrenDebugHookFn fn,
+                               void* userData);
+  friend int wrenDebugGetFrameCount(WrenVM* vm);
+  friend bool wrenDebugGetFrameInfo(WrenVM* vm, int frame,
+                                    WrenDebugFrameInfo* info);
+  friend int wrenDebugGetLocalCount(WrenVM* vm, int frame);
+  friend void wrenDebugGetLocal(WrenVM* vm, int frame, int index, int slot);
+  friend const char* wrenDebugGetLocalName(WrenVM* vm, int frame, int index);
+  friend int wrenDebugGetModuleVariableCount(WrenVM* vm, int frame);
+  friend const char* wrenDebugGetModuleVariableName(WrenVM* vm, int frame,
+                                                    int index);
+  friend void wrenDebugGetModuleVariable(WrenVM* vm, int frame, int index,
+                                         int slot);
 
   // ---------------------------------------------------------------------
   // State absorbed from the former wren::VM C++ wrapper. Only WrenVM's own

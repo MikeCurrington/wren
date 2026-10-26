@@ -482,10 +482,15 @@ void wrenVmDebugHook(WrenVM* vm, ObjFiber* fiber, CallFrame* frame)
   fiber->stackTop = fiber->stack + apiStackBase;
 }
 
+void WrenVM::setDebugHook(WrenDebugHookFn fn, void* userData)
+{
+  debugHook = fn;
+  debugHookData = userData;
+}
+
 void wrenSetDebugHook(WrenVM* vm, WrenDebugHookFn fn, void* userData)
 {
-  vm->debugHook = fn;
-  vm->debugHookData = userData;
+  vm->setDebugHook(fn, userData);
 }
 
 // Returns the call frame numbered the way the public debug API exposes
@@ -513,19 +518,24 @@ static CallFrame* debugGetFrame(WrenVM* vm, int index, ObjFiber** owner)
   return nullptr;
 }
 
-int wrenDebugGetFrameCount(WrenVM* vm)
+int WrenVM::debugGetFrameCount()
 {
   int count = 0;
-  for (ObjFiber* fiber = vm->fiber; fiber != nullptr; fiber = fiber->caller)
+  for (ObjFiber* fiber = this->fiber; fiber != nullptr; fiber = fiber->caller)
   {
     count += fiber->numFrames;
   }
   return count;
 }
 
-bool wrenDebugGetFrameInfo(WrenVM* vm, int frame, WrenDebugFrameInfo* info)
+int wrenDebugGetFrameCount(WrenVM* vm)
 {
-  CallFrame* callFrame = debugGetFrame(vm, frame, nullptr);
+  return vm->debugGetFrameCount();
+}
+
+bool WrenVM::debugGetFrameInfo(int frame, WrenDebugFrameInfo* info)
+{
+  CallFrame* callFrame = debugGetFrame(this, frame, nullptr);
   if (callFrame == nullptr || info == nullptr) return false;
 
   ObjFn* fn = callFrame->closure->fn;
@@ -555,6 +565,11 @@ bool wrenDebugGetFrameInfo(WrenVM* vm, int frame, WrenDebugFrameInfo* info)
   return true;
 }
 
+bool wrenDebugGetFrameInfo(WrenVM* vm, int frame, WrenDebugFrameInfo* info)
+{
+  return vm->debugGetFrameInfo(frame, info);
+}
+
 // Returns a pointer one past the last stack slot used by [callFrame] in
 // [fiber]. The fiber's innermost frame's slots end at the fiber's stack top
 // -- except for the running fiber while the debug hook's own API slots are
@@ -575,33 +590,43 @@ static Value* debugFrameLocalEnd(WrenVM* vm, ObjFiber* fiber,
   return callFrame[1].stackStart;
 }
 
-int wrenDebugGetLocalCount(WrenVM* vm, int frame)
+int WrenVM::debugGetLocalCount(int frame)
 {
   ObjFiber* owner = nullptr;
-  CallFrame* callFrame = debugGetFrame(vm, frame, &owner);
+  CallFrame* callFrame = debugGetFrame(this, frame, &owner);
   if (callFrame == nullptr) return 0;
 
-  Value* end = debugFrameLocalEnd(vm, owner, callFrame);
+  Value* end = debugFrameLocalEnd(this, owner, callFrame);
   return (int)(end - callFrame->stackStart);
+}
+
+int wrenDebugGetLocalCount(WrenVM* vm, int frame)
+{
+  return vm->debugGetLocalCount(frame);
+}
+
+void WrenVM::debugGetLocal(int frame, int index, int slot)
+{
+  ObjFiber* owner = nullptr;
+  CallFrame* callFrame = debugGetFrame(this, frame, &owner);
+  ASSERT(callFrame != nullptr, "Frame index out of range.");
+
+  Value* end = debugFrameLocalEnd(this, owner, callFrame);
+  ASSERT(index >= 0 && callFrame->stackStart + index < end,
+         "Local index out of range.");
+  ASSERT(slot >= 0 && slot < slotCount(), "Not that many slots.");
+
+  apiStack[slot] = callFrame->stackStart[index];
 }
 
 void wrenDebugGetLocal(WrenVM* vm, int frame, int index, int slot)
 {
-  ObjFiber* owner = nullptr;
-  CallFrame* callFrame = debugGetFrame(vm, frame, &owner);
-  ASSERT(callFrame != nullptr, "Frame index out of range.");
-
-  Value* end = debugFrameLocalEnd(vm, owner, callFrame);
-  ASSERT(index >= 0 && callFrame->stackStart + index < end,
-         "Local index out of range.");
-  ASSERT(slot >= 0 && slot < wrenGetSlotCount(vm), "Not that many slots.");
-
-  vm->apiStack[slot] = callFrame->stackStart[index];
+  vm->debugGetLocal(frame, index, slot);
 }
 
-const char* wrenDebugGetLocalName(WrenVM* vm, int frame, int index)
+const char* WrenVM::debugGetLocalName(int frame, int index)
 {
-  CallFrame* callFrame = debugGetFrame(vm, frame, nullptr);
+  CallFrame* callFrame = debugGetFrame(this, frame, nullptr);
   if (callFrame == nullptr || index < 0) return nullptr;
 
   ObjFn* fn = callFrame->closure->fn;
@@ -624,6 +649,11 @@ const char* wrenDebugGetLocalName(WrenVM* vm, int frame, int index)
   return name;
 }
 
+const char* wrenDebugGetLocalName(WrenVM* vm, int frame, int index)
+{
+  return vm->debugGetLocalName(frame, index);
+}
+
 // Returns the module of the function executing in call frame [frame], numbered
 // the way the public debug API exposes frames.
 static ObjModule* debugGetFrameModule(WrenVM* vm, int frame)
@@ -633,29 +663,44 @@ static ObjModule* debugGetFrameModule(WrenVM* vm, int frame)
   return callFrame->closure->fn->module;
 }
 
-int wrenDebugGetModuleVariableCount(WrenVM* vm, int frame)
+int WrenVM::debugGetModuleVariableCount(int frame)
 {
-  ObjModule* module = debugGetFrameModule(vm, frame);
+  ObjModule* module = debugGetFrameModule(this, frame);
   if (module == nullptr) return 0;
   return module->variableNames.count();
 }
 
-const char* wrenDebugGetModuleVariableName(WrenVM* vm, int frame, int index)
+int wrenDebugGetModuleVariableCount(WrenVM* vm, int frame)
 {
-  ObjModule* module = debugGetFrameModule(vm, frame);
+  return vm->debugGetModuleVariableCount(frame);
+}
+
+const char* WrenVM::debugGetModuleVariableName(int frame, int index)
+{
+  ObjModule* module = debugGetFrameModule(this, frame);
   ASSERT(module != nullptr, "Frame index out of range.");
   ASSERT(index >= 0 && index < module->variableNames.count(),
          "Variable index out of range.");
   return module->variableNames[index]->value;
 }
 
-void wrenDebugGetModuleVariable(WrenVM* vm, int frame, int index, int slot)
+const char* wrenDebugGetModuleVariableName(WrenVM* vm, int frame, int index)
 {
-  ObjModule* module = debugGetFrameModule(vm, frame);
+  return vm->debugGetModuleVariableName(frame, index);
+}
+
+void WrenVM::debugGetModuleVariable(int frame, int index, int slot)
+{
+  ObjModule* module = debugGetFrameModule(this, frame);
   ASSERT(module != nullptr, "Frame index out of range.");
   ASSERT(index >= 0 && index < module->variables.size(),
          "Variable index out of range.");
-  ASSERT(slot >= 0 && slot < wrenGetSlotCount(vm), "Not that many slots.");
+  ASSERT(slot >= 0 && slot < slotCount(), "Not that many slots.");
 
-  vm->apiStack[slot] = module->variables[index];
+  apiStack[slot] = module->variables[index];
+}
+
+void wrenDebugGetModuleVariable(WrenVM* vm, int frame, int index, int slot)
+{
+  vm->debugGetModuleVariable(frame, index, slot);
 }
