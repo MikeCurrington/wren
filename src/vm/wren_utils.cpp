@@ -44,7 +44,7 @@ void SymbolTable::blacken(WrenVM* vm)
   }
 
   // Keep track of how much memory is still in use.
-  vm->bytesAllocated += buffer_.capacity() * sizeof(ObjString*);
+  vm->ChargeBytes(buffer_.capacity() * sizeof(ObjString*));
 }
 
 int wrenUtf8EncodeNumBytes(int value)

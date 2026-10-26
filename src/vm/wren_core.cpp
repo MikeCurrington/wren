@@ -70,7 +70,7 @@ DEF_PRIMITIVE(fiber_new)
 
 DEF_PRIMITIVE(fiber_abort)
 {
-  vm->fiber->error = args[1];
+  vm->Fiber()->error = args[1];
 
   // If the error is explicitly null, it's not really an abort.
   return IS_NULL(args[1]);
@@ -166,7 +166,7 @@ DEF_PRIMITIVE(fiber_call1)
 
 DEF_PRIMITIVE(fiber_current)
 {
-  RETURN_OBJ(vm->fiber);
+  RETURN_OBJ(vm->Fiber());
 }
 
 DEF_PRIMITIVE(fiber_error)
@@ -176,7 +176,7 @@ DEF_PRIMITIVE(fiber_error)
 
 DEF_PRIMITIVE(fiber_exit)
 {
-  ObjFiber* current = vm->fiber;
+  ObjFiber* current = vm->Fiber();
 
   // The fiber will never run again, so close every upvalue it still has open,
   // as if all of its functions had returned.
@@ -194,12 +194,12 @@ DEF_PRIMITIVE(fiber_exit)
   {
     // Make the caller's call() or try() return the exit value.
     resumingFiber->stackTop[-1] = args[1];
-    vm->fiber = resumingFiber;
+    vm->SetFiber(resumingFiber);
   }
   else
   {
     // There is no fiber to return to. Store the final result value at the
-    // beginning of the stack so the C API can get it. Leaving [vm->fiber]
+    // beginning of the stack so the C API can get it. Leaving [fiber]
     // pointing at this (now finished) fiber tells the interpreter to stop.
     current->stack[0] = args[1];
     current->stackTop = current->stack + 1;
@@ -217,8 +217,8 @@ DEF_PRIMITIVE(fiber_isDone)
 DEF_PRIMITIVE(fiber_suspend)
 {
   // Switching to a null fiber tells the interpreter to stop and exit.
-  vm->fiber = nullptr;
-  vm->apiStack = nullptr;
+  vm->SetFiber(nullptr);
+  vm->SetApiStack(nullptr);
   return false;
 }
 
@@ -235,7 +235,7 @@ DEF_PRIMITIVE(fiber_transfer1)
 DEF_PRIMITIVE(fiber_transferError)
 {
   vm->RunFiber(AS_FIBER(args[0]), args, false, true, "transfer to");
-  vm->fiber->error = args[1];
+  vm->Fiber()->error = args[1];
   return false;
 }
 
@@ -244,7 +244,7 @@ DEF_PRIMITIVE(fiber_try)
   vm->RunFiber(AS_FIBER(args[0]), args, true, false, "try");
   
   // If we're switching to a valid fiber to try, remember that we're trying it.
-  if (!wrenHasError(vm->fiber)) vm->fiber->state = FIBER_TRY;
+  if (!wrenHasError(vm->Fiber())) vm->Fiber()->state = FIBER_TRY;
   return false;
 }
 
@@ -253,23 +253,23 @@ DEF_PRIMITIVE(fiber_try1)
   vm->RunFiber(AS_FIBER(args[0]), args, true, true, "try");
   
   // If we're switching to a valid fiber to try, remember that we're trying it.
-  if (!wrenHasError(vm->fiber)) vm->fiber->state = FIBER_TRY;
+  if (!wrenHasError(vm->Fiber())) vm->Fiber()->state = FIBER_TRY;
   return false;
 }
 
 DEF_PRIMITIVE(fiber_yield)
 {
-  ObjFiber* current = vm->fiber;
-  vm->fiber = current->caller;
+  ObjFiber* current = vm->Fiber();
+  vm->SetFiber(current->caller);
 
   // Unhook this fiber from the one that called it.
   current->caller = nullptr;
   current->state = FIBER_OTHER;
 
-  if (vm->fiber != nullptr)
+  if (vm->Fiber() != nullptr)
   {
     // Make the caller's run method return null.
-    vm->fiber->stackTop[-1] = NULL_VAL;
+    vm->Fiber()->stackTop[-1] = NULL_VAL;
   }
 
   return false;
@@ -277,17 +277,17 @@ DEF_PRIMITIVE(fiber_yield)
 
 DEF_PRIMITIVE(fiber_yield1)
 {
-  ObjFiber* current = vm->fiber;
-  vm->fiber = current->caller;
+  ObjFiber* current = vm->Fiber();
+  vm->SetFiber(current->caller);
 
   // Unhook this fiber from the one that called it.
   current->caller = nullptr;
   current->state = FIBER_OTHER;
 
-  if (vm->fiber != nullptr)
+  if (vm->Fiber() != nullptr)
   {
     // Make the caller's run method return the argument passed to yield.
-    vm->fiber->stackTop[-1] = args[1];
+    vm->Fiber()->stackTop[-1] = args[1];
 
     // When the yielding fiber resumes, we'll store the result of the yield
     // call in its stack. Since Fiber.yield(value) has two arguments (the Fiber

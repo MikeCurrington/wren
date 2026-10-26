@@ -16,7 +16,7 @@ static uint32_t validateIndexValue(WrenVM* vm, uint32_t count, double value,
   // Check bounds.
   if (value >= 0 && value < count) return (uint32_t)value;
   
-  vm->fiber->error = vm->StringFormat( "$ out of bounds.", argName);
+  vm->Fiber()->error = vm->StringFormat( "$ out of bounds.", argName);
   return UINT32_MAX;
 }
 
@@ -108,7 +108,7 @@ uint32_t calculateRange(WrenVM* vm, ObjRange* range, uint32_t* length,
   // Check bounds.
   if (value < 0 || value >= *length)
   {
-    vm->fiber->error = CONST_STRING(vm, "Range end out of bounds.");
+    vm->Fiber()->error = CONST_STRING(vm, "Range end out of bounds.");
     return UINT32_MAX;
   }
 

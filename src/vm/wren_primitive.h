@@ -50,14 +50,14 @@
 #define RETURN_ERROR(msg)                                                      \
     do                                                                         \
     {                                                                          \
-      vm->fiber->error = vm->NewStringLength(msg, sizeof(msg) - 1);        \
+      vm->Fiber()->error = vm->NewStringLength(msg, sizeof(msg) - 1);        \
       return false;                                                            \
     } while (false)
 
 #define RETURN_ERROR_FMT(...)                                                  \
     do                                                                         \
     {                                                                          \
-      vm->fiber->error = vm->StringFormat(__VA_ARGS__);                    \
+      vm->Fiber()->error = vm->StringFormat(__VA_ARGS__);                    \
       return false;                                                            \
     } while (false)
 

@@ -703,7 +703,7 @@ namespace debug
 
         if (expandable)
         {
-          vm_->apiStack[2] = value;
+          vm_->ApiStack()[2] = value;
           WrenHandle* handle = wrenGetSlotHandle(vm_, 2);
           VariableRef::Kind kind = VariableRef::Kind::List;
           ObjType type = AS_OBJ(value)->type;
@@ -748,7 +748,7 @@ namespace debug
               if (i == 0 && isMethod) name = "this";
               else if (localName != nullptr) name = localName;
               else name = "slot" + std::to_string(i);
-              appendVariable(name, vm_->apiStack[3]);
+              appendVariable(name, vm_->ApiStack()[3]);
             }
           }
           break;
@@ -761,7 +761,7 @@ namespace debug
           {
             const char* name = wrenDebugGetModuleVariableName(vm_, ref->frame, i);
             wrenDebugGetModuleVariable(vm_, ref->frame, i, 3);
-            appendVariable(name, vm_->apiStack[3]);
+            appendVariable(name, vm_->ApiStack()[3]);
           }
           break;
         }
@@ -773,7 +773,7 @@ namespace debug
           for (int i = 0; i < count; i++)
           {
             wrenGetListElement(vm_, 0, i, 3);
-            appendVariable("[" + std::to_string(i) + "]", vm_->apiStack[3]);
+            appendVariable("[" + std::to_string(i) + "]", vm_->ApiStack()[3]);
           }
           break;
         }
@@ -781,7 +781,7 @@ namespace debug
         case VariableRef::Kind::Map:
         {
           setSlotFromRef(*ref, 0);
-          ObjMap* map = AS_MAP(vm_->apiStack[0]);
+          ObjMap* map = AS_MAP(vm_->ApiStack()[0]);
           for (uint32_t i = 0; i < map->capacity; i++)
           {
             MapEntry* entry = &map->entries[i];
@@ -795,7 +795,7 @@ namespace debug
         case VariableRef::Kind::Instance:
         {
           setSlotFromRef(*ref, 0);
-          Obj* obj = AS_OBJ(vm_->apiStack[0]);
+          Obj* obj = AS_OBJ(vm_->ApiStack()[0]);
           ObjInstance* instance = (ObjInstance*)obj;
           for (int i = 0; i < obj->classObj->numFields; i++)
           {

@@ -18,7 +18,7 @@ void metaCompile(WrenVM* vm)
   // up the callstack assuming that the meta module has one level of
   // indirection before hitting the user's code. Any change to meta may require
   // this constant to be tweaked.
-  ObjFiber* currentFiber = vm->fiber;
+  ObjFiber* currentFiber = vm->Fiber();
   ObjFn* fn = currentFiber->frames[currentFiber->numFrames - 2].closure->fn;
   ObjString* module = fn->module->name;
 
@@ -29,11 +29,11 @@ void metaCompile(WrenVM* vm)
   // bare ObjClosure*.
   if (closure == nullptr)
   {
-    vm->apiStack[0] = NULL_VAL;
+    vm->ApiStack()[0] = NULL_VAL;
   }
   else
   {
-    vm->apiStack[0] = OBJ_VAL(closure);
+    vm->ApiStack()[0] = OBJ_VAL(closure);
   }
 }
 
@@ -41,16 +41,16 @@ void metaGetModuleVariables(WrenVM* vm)
 {
   wrenEnsureSlots(vm, 3);
   
-  Value moduleValue = wrenMapGet(vm->modules, vm->apiStack[1]);
+  Value moduleValue = wrenMapGet(vm->Modules(), vm->ApiStack()[1]);
   if (IS_UNDEFINED(moduleValue))
   {
-    vm->apiStack[0] = NULL_VAL;
+    vm->ApiStack()[0] = NULL_VAL;
     return;
   }
     
   ObjModule* module = AS_MODULE(moduleValue);
   ObjList* names = wrenConstruct<ObjList>(vm, 0, module->variableNames.count());
-  vm->apiStack[0] = OBJ_VAL(names);
+  vm->ApiStack()[0] = OBJ_VAL(names);
 
   // Initialize the elements to null in case a collection happens when we
   // allocate the strings below.

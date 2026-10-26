@@ -562,7 +562,7 @@ static void initCompiler(Compiler* compiler, Parser* parser, Compiler* parent,
   compiler->constants = nullptr;
   compiler->attributes = nullptr;
 
-  parser->vm->compiler = compiler;
+  parser->vm->SetCompiler(compiler);
 
   // Declare a local slot for either the closure or method receiver so that we
   // don't try to reuse that slot for a user-defined local variable. For
@@ -1692,7 +1692,7 @@ static ObjFn* endCompiler(Compiler* compiler,
   // If we hit an error, don't finish the function since it's borked anyway.
   if (compiler->parser->hasError)
   {
-    compiler->parser->vm->compiler = compiler->parent;
+    compiler->parser->vm->SetCompiler(compiler->parent);
     return nullptr;
   }
 
@@ -1725,7 +1725,7 @@ static ObjFn* endCompiler(Compiler* compiler,
   }
 
   // Pop this compiler off the stack.
-  compiler->parser->vm->compiler = compiler->parent;
+  compiler->parser->vm->SetCompiler(compiler->parent);
   
   #if WREN_DEBUG_DUMP_COMPILED_CODE
     wrenDumpCode(compiler->parser->vm, compiler->fn);
@@ -1880,7 +1880,7 @@ static void finishParameterList(Compiler* compiler, Signature* signature)
 // Gets the symbol for a method [name] with [length].
 static int methodSymbol(Compiler* compiler, const char* name, int length)
 {
-  int symbol = compiler->parser->vm->methodNames.ensure(compiler->parser->vm, name, length);
+  int symbol = compiler->parser->vm->EnsureMethodName(name, length);
 
   if (symbol > MAX_METHODS) {
     error(compiler, "Method limit of %d reached.", MAX_METHODS);
@@ -3516,7 +3516,7 @@ static bool method(Compiler* compiler, Variable classVariable)
 
     // We don't need the function we started compiling in the parameter list
     // any more.
-    methodCompiler.parser->vm->compiler = methodCompiler.parent;
+    methodCompiler.parser->vm->SetCompiler(methodCompiler.parent);
   }
   else
   {

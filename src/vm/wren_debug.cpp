@@ -154,7 +154,7 @@ void wrenDumpValue(Value value)
 #endif
 }
 
-static int dumpInstruction(WrenVM* vm, ObjFn* fn, int i, int* lastLine)
+int WrenVM::DumpInstruction(ObjFn* fn, int i, int* lastLine)
 {
   int start = i;
   uint8_t* bytecode = fn->code.data();
@@ -254,7 +254,7 @@ static int dumpInstruction(WrenVM* vm, ObjFn* fn, int i, int* lastLine)
       int numArgs = bytecode[i - 1] - CODE_CALL_0;
       int symbol = READ_SHORT();
       printf("CALL_%-11d %5d '%s'\n", numArgs, symbol,
-             vm->methodNames[symbol]->value);
+             methodNames[symbol]->value);
       break;
     }
 
@@ -280,7 +280,7 @@ static int dumpInstruction(WrenVM* vm, ObjFn* fn, int i, int* lastLine)
       int symbol = READ_SHORT();
       int superclass = READ_SHORT();
       printf("SUPER_%-10d %5d '%s' %5d\n", numArgs, symbol,
-             vm->methodNames[symbol]->value, superclass);
+             methodNames[symbol]->value, superclass);
       break;
     }
 
@@ -357,7 +357,7 @@ static int dumpInstruction(WrenVM* vm, ObjFn* fn, int i, int* lastLine)
     {
       int symbol = READ_SHORT();
       printf("%-16s %5d '%s'\n", "METHOD_INSTANCE", symbol,
-             vm->methodNames[symbol]->value);
+             methodNames[symbol]->value);
       break;
     }
 
@@ -365,7 +365,7 @@ static int dumpInstruction(WrenVM* vm, ObjFn* fn, int i, int* lastLine)
     {
       int symbol = READ_SHORT();
       printf("%-16s %5d '%s'\n", "METHOD_STATIC", symbol,
-             vm->methodNames[symbol]->value);
+             methodNames[symbol]->value);
       break;
     }
       
@@ -410,7 +410,7 @@ static int dumpInstruction(WrenVM* vm, ObjFn* fn, int i, int* lastLine)
 
 int WrenVM::DumpInstruction(ObjFn* fn, int i)
 {
-  return dumpInstruction(this, fn, i, nullptr);
+  return DumpInstruction(fn, i, nullptr);
 }
 
 void WrenVM::DumpCode(ObjFn* fn)
@@ -423,7 +423,7 @@ void WrenVM::DumpCode(ObjFn* fn)
   int lastLine = -1;
   for (;;)
   {
-    int offset = dumpInstruction(this, fn, i, &lastLine);
+    int offset = DumpInstruction(fn, i, &lastLine);
     if (offset == -1) break;
     i += offset;
   }

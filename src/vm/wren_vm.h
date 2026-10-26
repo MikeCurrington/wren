@@ -378,6 +378,38 @@ public:
   // Returns the class of [value]. Must stay inline; defined after the class.
   ObjClass* GetClassInline(Value value);
 
+  // The currently running fiber. Exposed for the primitives and foreign
+  // method bodies, which cannot be class members because their signature is
+  // fixed by the Primitive/WrenForeignMethodFn function-pointer typedefs.
+  ObjFiber* Fiber() const { return fiber; }
+  void SetFiber(ObjFiber* runningFiber) { fiber = runningFiber; }
+
+  // The C API slot region (see the slot functions in wren.h). Same rationale
+  // as Fiber(): the primitives, the optional modules, and the debugger's
+  // debug hook inspect slots directly.
+  Value* ApiStack() const { return apiStack; }
+  void SetApiStack(Value* stack) { apiStack = stack; }
+
+  // The map of loaded modules, keyed the way GetModule() looks them up.
+  // Exposed for the meta module's foreign methods.
+  ObjMap* Modules() const { return modules; }
+
+  // Registers/unregisters the compiler whose objects the GC must find, while
+  // a compilation is in progress. Used by the compiler's free helper
+  // functions, which cannot be members.
+  void SetCompiler(Compiler* compiler) { this->compiler = compiler; }
+
+  // Adds [name] to the interned method name table, returning its index.
+  // Exposed for the compiler's free helper functions.
+  int EnsureMethodName(const char* name, size_t length)
+  {
+    return methodNames.ensure(this, name, length);
+  }
+
+  // Accounts [bytes] of still-live allocation during GC marking. Exposed for
+  // SymbolTable::blacken(), whose buffer storage lives outside the VM.
+  void ChargeBytes(size_t bytes) { bytesAllocated += bytes; }
+
 private:
   // ---------------------------------------------------------------------
   // Bodies of the exported C API. Each wren*() function declared in wren.h
@@ -486,6 +518,7 @@ private:
   Value* DebugFrameLocalEnd(ObjFiber* fiber, CallFrame* callFrame);
   ObjModule* DebugFrameModule(int frame);
   int DumpInstruction(ObjFn* fn, int i);
+  int DumpInstruction(ObjFn* fn, int i, int* lastLine);
 
   // The exported C API functions in wren.h, which forward to the private
   // members above.
@@ -546,6 +579,31 @@ private:
                                                     int index);
   friend void wrenDebugGetModuleVariable(WrenVM* vm, int frame, int index,
                                          int slot);
+
+  // The Obj constructors link each new object into the VM's object list and
+  // read the core class pointers.
+  friend struct Obj;
+  friend struct ObjString;
+  friend struct ObjUpvalue;
+  friend struct ObjModule;
+  friend struct ObjFn;
+  friend struct ObjClosure;
+  friend struct ObjFiber;
+  friend struct ObjClass;
+  friend struct ObjForeign;
+  friend struct ObjInstance;
+  friend struct ObjList;
+  friend struct ObjMap;
+  friend struct ObjRange;
+
+  // The handle and call context constructors link themselves into the VM's
+  // lists.
+  friend class WrenHandle;
+  friend class WrenCallContext;
+
+  // The compiler registers itself in [compiler] and adds to [methodNames].
+  friend struct sCompiler;
+
   // State absorbed from the former wren::VM C++ wrapper. Only WrenVM's own
   // methods touch these.
   // ---------------------------------------------------------------------
@@ -563,14 +621,10 @@ private:
   // valid, since it holds WrenHandles and the debug hook.
   std::unique_ptr<wren::debug::Debugger> debugger_;
 
-public:
   // ---------------------------------------------------------------------
-  // Internal interpreter state.
-  //
-  // Wren's own implementation (the interpreter loop, garbage collector,
-  // compiler, primitives, and debug internals) reads and writes these fields
-  // directly, so they remain public to it. They are not part of the host
-  // API: hosts should work through the methods above.
+  // Internal interpreter state. Private: only WrenVM's own member functions
+  // (and the friends declared above) read and write these fields. They are
+  // not part of the host API: hosts work through the methods above.
   // ---------------------------------------------------------------------
 
   ObjClass* boolClass = nullptr;
