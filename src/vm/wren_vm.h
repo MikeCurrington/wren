@@ -341,9 +341,7 @@ public:
 
   // The "gray" set for the garbage collector. This is the stack of unprocessed
   // objects while a garbage collection pass is in process.
-  Obj** gray = nullptr;
-  int grayCount = 0;
-  int grayCapacity = 0;
+  std::vector<Obj*> gray;
 
   // The list of temporary roots. This is for temporary or new objects that are
   // not otherwise reachable but should not be collected.

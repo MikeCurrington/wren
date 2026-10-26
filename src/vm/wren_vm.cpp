@@ -65,12 +65,8 @@ WrenVM::WrenVM(Config config)
   this->config.reallocateFn = reallocate;
   this->debugPort = config.debugPort;
 
-  // TODO: Should we allocate and free this during a GC?
-  this->grayCount = 0;
   // TODO: Tune this.
-  this->grayCapacity = 4;
-  this->gray = (Obj**)reallocate(nullptr, this->grayCapacity * sizeof(Obj*),
-                                 this->config.userData);
+  this->gray.reserve(4);
   this->nextGC = this->config.initialHeapSize;
 
   this->modules = wrenConstruct<ObjMap>(this, 0);
@@ -93,9 +89,6 @@ WrenVM::~WrenVM()
     wrenFreeObj(this, obj);
     obj = next;
   }
-
-  // Free up the GC gray set.
-  gray = (Obj**)config.reallocateFn(gray, 0, config.userData);
 
   // Tell the user if they didn't free any handles. We don't want to just free
   // them here because the host app may still have pointers to them that they

@@ -7,10 +7,12 @@
 #include <cstdio>
 #include <cstring>
 #include <deque>
+#include <format>
 #include <map>
 #include <mutex>
 #include <set>
 #include <string>
+using namespace std::string_literals;
 
 #include "dap_io.h"
 
@@ -58,67 +60,66 @@ namespace debug
     std::string formatValue(Value value)
     {
       if (IS_NUM(value)) return formatNumber(AS_NUM(value));
-      if (IS_BOOL(value)) return AS_BOOL(value) ? "true" : "false";
-      if (IS_NULL(value)) return "null";
-      if (!IS_OBJ(value)) return "?";
+      if (IS_BOOL(value)) return AS_BOOL(value) ? "true"s : "false"s;
+      if (IS_NULL(value)) return "null"s;
+      if (!IS_OBJ(value)) return "?"s;
 
       Obj* obj = AS_OBJ(value);
       switch (obj->type)
       {
         case OBJ_STRING:
-          return truncate("\"" + std::string(AS_STRING(value)->value) + "\"",
-                          kMaxValueLength);
+        {
+          auto s = std::format("\"{}\"", (const char*const)AS_STRING(value)->value);
+          return truncate(s, kMaxValueLength);
+        }
 
         case OBJ_LIST:
-          return "list [" + std::to_string(AS_LIST(value)->elements.size()) + "]";
+          return std::format("list [{}]", AS_LIST(value)->elements.size());
 
         case OBJ_MAP:
-          return "map [" + std::to_string(AS_MAP(value)->count) + "]";
+          return std::format("map [{}]", AS_MAP(value)->count);
 
         case OBJ_RANGE:
         {
           ObjRange* range = AS_RANGE(value);
           return formatNumber(range->from) +
-              (range->isInclusive ? ".." : "...") + formatNumber(range->to);
+              (range->isInclusive ? ".."s : "..."s) + formatNumber(range->to);
         }
 
         case OBJ_CLASS:
-          return "class " + std::string(AS_CLASS(value)->name->value);
+          return std::format<const char*const>("class {}", AS_CLASS(value)->name->value);
 
         case OBJ_FN:
         {
           ObjFn* fn = AS_FN(value);
-          return "fn " + (fn->debug->name != nullptr
-              ? std::string(fn->debug->name) : std::string("(anonymous)"));
+          return std::format("fn {}", (fn->debug->name != nullptr
+              ? std::string(fn->debug->name) : "(anonymous)"s));
         }
 
         case OBJ_CLOSURE:
         {
           ObjFn* fn = AS_CLOSURE(value)->fn;
-          return "fn " + (fn->debug->name != nullptr
-              ? std::string(fn->debug->name) : std::string("(anonymous)"));
+          return std::format("fn {}", (fn->debug->name != nullptr
+              ? std::string(fn->debug->name) : "(anonymous)"s));
         }
 
         case OBJ_FIBER:
-          return "fiber";
+          return "fiber"s;
 
         case OBJ_INSTANCE:
         {
           ObjClass* classObj = obj->classObj;
-          return std::string(classObj->name->value) + " {" +
-              std::to_string(classObj->numFields) + " field(s)}";
+          return std::format("{} {{{} field(s)}}", (const char*const)classObj->name->value, classObj->numFields);
         }
 
         case OBJ_FOREIGN:
         {
-          ObjClass* classObj = obj->classObj;
-          char buffer[64];
-          snprintf(buffer, sizeof(buffer), " @ %p", AS_FOREIGN(value)->data);
-          return std::string(classObj->name->value) + buffer;
+          const ObjClass* classObj = obj->classObj;
+          return std::format("{} @ {:p}", (const char*const)classObj->name->value, (const void*)AS_FOREIGN(value)->data);
         }
 
         default:
-          return "[object]";
+          return "[object]"s;
       }
     }
 

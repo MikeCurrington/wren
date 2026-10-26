@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <string.h>
 #include <utility>
+#include <vector>
 
 #include "wren_common.h"
 #include "wren_math.h"
@@ -124,7 +125,7 @@ struct Obj
   Obj(WrenVM* vm, ObjType objType, ObjClass* classObj);
 
   ObjType type;
-  bool isDark;
+  bool isDark = false;
 
   // The object's class.
   ObjClass* classObj;

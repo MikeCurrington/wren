@@ -31,12 +31,11 @@
 // reallocating when the call stack grows.
 #define INITIAL_CALL_FRAMES 4
 
-Obj::Obj(WrenVM* vm, ObjType objType, ObjClass* classObj)
+Obj::Obj(WrenVM* vm, ObjType objType, ObjClass* classObj_)
+  : type(objType)
+  , classObj(classObj_)
+  , next(vm->first)
 {
-  type = objType;
-  isDark = false;
-  this->classObj = classObj;
-  next = vm->first;
   vm->first = this;
 }
 
@@ -928,15 +927,7 @@ void wrenGrayObj(WrenVM* vm, Obj* obj)
 
   // Add it to the gray list so it can be recursively explored for
   // more marks later.
-  if (vm->grayCount >= vm->grayCapacity)
-  {
-    vm->grayCapacity = vm->grayCount * 2;
-    vm->gray = (Obj**)vm->config.reallocateFn(vm->gray,
-                                              vm->grayCapacity * sizeof(Obj*),
-                                              vm->config.userData);
-  }
-
-  vm->gray[vm->grayCount++] = obj;
+  vm->gray.emplace_back(obj);
 }
 
 void wrenGrayValue(WrenVM* vm, Value value)
@@ -947,9 +938,9 @@ void wrenGrayValue(WrenVM* vm, Value value)
 
 void wrenGrayBuffer(WrenVM* vm, ValueBuffer* buffer)
 {
-  for (int i = 0; i < buffer->size(); i++)
+  for (auto& v: *buffer)
   {
-    wrenGrayValue(vm, (*buffer)[i]);
+    wrenGrayValue(vm, v);
   }
 }
 
@@ -1161,10 +1152,12 @@ static void blackenObject(WrenVM* vm, Obj* obj)
 
 void wrenBlackenObjects(WrenVM* vm)
 {
-  while (vm->grayCount > 0)
+  while (!vm->gray.empty())
   {
-    // Pop an item from the gray stack.
-    Obj* obj = vm->gray[--vm->grayCount];
+    // Pop an item from the gray stack. blackenObject may push more objects
+    // onto the gray stack while it runs.
+    Obj* obj = vm->gray.back();
+    vm->gray.pop_back();
     blackenObject(vm, obj);
   }
 }
