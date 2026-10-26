@@ -237,7 +237,7 @@ public:
 
   WrenInterpretResult Interpret(std::string_view mod, std::string_view src)
   {
-    return wrenInterpret(this, std::string(mod).c_str(), std::string(src).c_str());
+    return InterpretSource(std::string(mod).c_str(), std::string(src).c_str());
   }
 
   // A RAII handle for calling a method with [sig]. Defined in wren.hpp.
@@ -245,13 +245,13 @@ public:
 
   void GetVariable(std::string_view mod, std::string_view name, int slot)
   {
-    wrenEnsureSlots(this, slot + 1);
-    wrenGetVariable(this, std::string(mod).c_str(), std::string(name).c_str(), slot);
+    EnsureSlots(slot + 1);
+    LookupVariable(std::string(mod).c_str(), std::string(name).c_str(), slot);
   }
 
-  void CollectGarbage() { wrenCollectGarbage(this); }
-  void* UserData() const { return wrenGetUserData(this); }
-  void SetUserData(void* data) { wrenSetUserData(this, data); }
+  void CollectGarbage();
+  void* UserData() const;
+  void SetUserData(void* data);
 
   // Get a foreign object from a slot as a typed reference. Defined in
   // wren.hpp (needs the converters).
@@ -265,13 +265,203 @@ public:
   // Set a slot from an existing shared_ptr — shares ownership, no copy.
   template <typename T> void SetShared(int slot, std::shared_ptr<T> ptr);
 
-  void SetNull(int slot) { wrenSetSlotNull(this, slot); }
-  int SlotCount() const { return wrenGetSlotCount(this); }
-  void EnsureSlots(int n) { wrenEnsureSlots(this, n); }
-  WrenType SlotType(int s) const { return wrenGetSlotType(this, s); }
+  void SetNull(int slot);
+  int SlotCount() const;
+  void EnsureSlots(int numSlots);
+  WrenType SlotType(int slot) const;
+
+  // ---------------------------------------------------------------------
+  // VM implementation. The rest of Wren's implementation (core library,
+  // compiler, garbage collector, and debugger) calls these; they are not
+  // part of the host API.
+  // ---------------------------------------------------------------------
+
+  // Generic allocation through the VM; see the wrenReallocate() notes below.
+  void* Reallocate(void* memory, size_t oldSize, size_t newSize);
+
+  // GC temporary roots.
+  void PushRoot(Obj* obj);
+  void PopRoot();
+
+  // Creates a new [WrenHandle] for [value].
+  WrenHandle* MakeHandle(Value value);
+
+  // Compiles [source] in the context of [module]. Returns NULL if a compile
+  // error occurred.
+  ObjClosure* CompileSource(const char* module, const char* source,
+                            bool isExpression, bool printErrors);
+
+  // Looks up a variable from a previously-loaded module. Aborts the current
+  // fiber if the module or variable could not be found.
+  Value GetModuleVariable(Value moduleName, Value variableName);
+
+  // Returns the value of the module-level variable named [name] in [module].
+  Value FindVariable(ObjModule* module, const char* name);
+
+  // Adds a new implicitly declared top-level variable named [name] to
+  // [module] from a use site on [line]. Returns the symbol, or -2 if there
+  // are too many variables defined.
+  int DeclareVariable(ObjModule* module, const char* name, size_t length,
+                      int line);
+
+  // Adds a new top-level variable named [name] to [module]. Returns the
+  // symbol, -1 if already defined, -2 if too many, or -3 if a localname was
+  // used before being defined.
+  int DefineVariable(ObjModule* module, const char* name, size_t length,
+                     Value value, int* line);
+
+  // Invokes the finalizer for [foreign].
+  void FinalizeForeign(ObjForeign* foreign);
+
+  // Pushes [closure] onto [fiber]'s callstack to invoke it. Expects [numArgs]
+  // arguments (including the receiver) to be on the top of the stack already.
+  void CallFunction(ObjFiber* fiber, ObjClosure* closure, int numArgs);
+
+  // Returns the class of [value]. Must stay inline; defined after the class.
+  ObjClass* GetClassInline(Value value);
 
 private:
   // ---------------------------------------------------------------------
+  // Bodies of the exported C API. Each wren*() function declared in wren.h
+  // is a one-line forwarder to a member here or to a public method above,
+  // which holds the real implementation.
+  // ---------------------------------------------------------------------
+
+  // Slots (wren.h): reading and writing slot values.
+  bool GetSlotBool(int slot);
+  const char* GetSlotBytes(int slot, int* length);
+  double GetSlotDouble(int slot);
+  void* GetSlotForeign(int slot);
+  const char* GetSlotString(int slot);
+  WrenHandle* GetSlotHandle(int slot);
+  void SetSlotBool(int slot, bool value);
+  void SetSlotBytes(int slot, const char* bytes, size_t length);
+  void SetSlotDouble(int slot, double value);
+  void* SetSlotNewForeign(int slot, int classSlot, size_t size);
+  void SetSlotNewList(int slot);
+  void SetSlotNewMap(int slot);
+  void SetSlotString(int slot, const char* text);
+  void SetSlotHandle(int slot, WrenHandle* handle);
+
+  // Slots (wren.h): list and map elements.
+  int GetListCount(int slot);
+  void GetListElement(int listSlot, int index, int elementSlot);
+  void SetListElement(int listSlot, int index, int elementSlot);
+  void InsertInList(int listSlot, int index, int elementSlot);
+  int GetMapCount(int slot);
+  bool GetMapContainsKey(int mapSlot, int keySlot);
+  void GetMapValue(int mapSlot, int keySlot, int valueSlot);
+  void SetMapValue(int mapSlot, int keySlot, int valueSlot);
+  void RemoveMapValue(int mapSlot, int keySlot, int removedValueSlot);
+
+  // Execution, handles, and module variables (wren.h).
+  WrenInterpretResult InterpretSource(const char* module, const char* source);
+  WrenHandle* MakeCallHandle(const char* signature);
+  WrenInterpretResult Call(WrenHandle* method);
+  void ReleaseHandle(WrenHandle* handle);
+  WrenCallContext* BeginCall();
+  void EndCall(WrenCallContext* context);
+  void AbortFiber(int slot);
+  bool HasVariable(const char* module, const char* name);
+  bool HasModule(const char* module);
+  void LookupVariable(const char* module, const char* name, int slot);
+
+  // Debug API (wren.h; defined in wren_debug.cpp).
+  void SetDebugHook(WrenDebugHookFn fn, void* userData);
+  int DebugGetFrameCount();
+  bool DebugGetFrameInfo(int frame, WrenDebugFrameInfo* info);
+  int DebugGetLocalCount(int frame);
+  void DebugGetLocal(int frame, int index, int slot);
+  const char* DebugGetLocalName(int frame, int index);
+  int DebugGetModuleVariableCount(int frame);
+  const char* DebugGetModuleVariableName(int frame, int index);
+  void DebugGetModuleVariable(int frame, int index, int slot);
+
+  // Interpreter and module machinery (wren_vm.cpp).
+  WrenInterpretResult RunInterpreter(ObjFiber* fiber);
+  void RuntimeError();
+  void MethodNotFound(ObjClass* classObj, int symbol);
+  void CallForeign(ObjFiber* fiber, WrenForeignMethodFn foreign,
+                   int numArgs);
+  bool CheckArity(Value value, int numArgs);
+  ObjUpvalue* CaptureUpvalue(ObjFiber* fiber, Value* local);
+  WrenForeignMethodFn FindForeignMethod(const char* moduleName,
+      const char* className, bool isStatic, const char* signature);
+  void BindMethod(int methodType, int symbol, ObjModule* module,
+                  ObjClass* classObj, Value methodValue);
+  ObjModule* GetModule(Value name);
+  ObjClosure* CompileInModule(Value name, const char* source,
+                              bool isExpression, bool printErrors);
+  Value ValidateSuperclass(Value name, Value superclassValue, int numFields);
+  void NewForeign(ObjClass* classObj, ObjModule* module);
+  void EndClass();
+  void CreateClass(int numFields, ObjModule* module);
+  void CreateForeign(ObjFiber* fiber, Value* stack);
+  Value ResolveModuleName(Value name);
+  Value ImportModule(Value name);
+  Value GetModuleVariable(ObjModule* module, Value variableName);
+  void ValidateApiSlot(int slot) const;
+  void SetSlot(int slot, Value value);
+
+  // The exported C API functions in wren.h, which forward to the private
+  // members above.
+  friend bool wrenGetSlotBool(WrenVM* vm, int slot);
+  friend const char* wrenGetSlotBytes(WrenVM* vm, int slot, int* length);
+  friend double wrenGetSlotDouble(WrenVM* vm, int slot);
+  friend void* wrenGetSlotForeign(WrenVM* vm, int slot);
+  friend const char* wrenGetSlotString(WrenVM* vm, int slot);
+  friend WrenHandle* wrenGetSlotHandle(WrenVM* vm, int slot);
+  friend void wrenSetSlotBool(WrenVM* vm, int slot, bool value);
+  friend void wrenSetSlotBytes(WrenVM* vm, int slot, const char* bytes,
+                               size_t length);
+  friend void wrenSetSlotDouble(WrenVM* vm, int slot, double value);
+  friend void* wrenSetSlotNewForeign(WrenVM* vm, int slot, int classSlot,
+                                     size_t size);
+  friend void wrenSetSlotNewList(WrenVM* vm, int slot);
+  friend void wrenSetSlotNewMap(WrenVM* vm, int slot);
+  friend void wrenSetSlotString(WrenVM* vm, int slot, const char* text);
+  friend void wrenSetSlotHandle(WrenVM* vm, int slot, WrenHandle* handle);
+  friend int wrenGetListCount(WrenVM* vm, int slot);
+  friend void wrenGetListElement(WrenVM* vm, int listSlot, int index,
+                                 int elementSlot);
+  friend void wrenSetListElement(WrenVM* vm, int listSlot, int index,
+                                 int elementSlot);
+  friend void wrenInsertInList(WrenVM* vm, int listSlot, int index,
+                               int elementSlot);
+  friend int wrenGetMapCount(WrenVM* vm, int slot);
+  friend bool wrenGetMapContainsKey(WrenVM* vm, int mapSlot, int keySlot);
+  friend void wrenGetMapValue(WrenVM* vm, int mapSlot, int keySlot,
+                              int valueSlot);
+  friend void wrenSetMapValue(WrenVM* vm, int mapSlot, int keySlot,
+                              int valueSlot);
+  friend void wrenRemoveMapValue(WrenVM* vm, int mapSlot, int keySlot,
+                                 int removedValueSlot);
+  friend WrenInterpretResult wrenInterpret(WrenVM* vm, const char* module,
+                                           const char* source);
+  friend WrenHandle* wrenMakeCallHandle(WrenVM* vm, const char* signature);
+  friend WrenInterpretResult wrenCall(WrenVM* vm, WrenHandle* method);
+  friend void wrenReleaseHandle(WrenVM* vm, WrenHandle* handle);
+  friend WrenCallContext* wrenBeginCall(WrenVM* vm);
+  friend void wrenEndCall(WrenVM* vm, WrenCallContext* context);
+  friend void wrenAbortFiber(WrenVM* vm, int slot);
+  friend bool wrenHasVariable(WrenVM* vm, const char* module,
+                              const char* name);
+  friend bool wrenHasModule(WrenVM* vm, const char* module);
+  friend void wrenGetVariable(WrenVM* vm, const char* module,
+                              const char* name, int slot);
+  friend void wrenSetDebugHook(WrenVM* vm, WrenDebugHookFn fn,
+                               void* userData);
+  friend int wrenDebugGetFrameCount(WrenVM* vm);
+  friend bool wrenDebugGetFrameInfo(WrenVM* vm, int frame,
+                                    WrenDebugFrameInfo* info);
+  friend int wrenDebugGetLocalCount(WrenVM* vm, int frame);
+  friend void wrenDebugGetLocal(WrenVM* vm, int frame, int index, int slot);
+  friend const char* wrenDebugGetLocalName(WrenVM* vm, int frame, int index);
+  friend int wrenDebugGetModuleVariableCount(WrenVM* vm, int frame);
+  friend const char* wrenDebugGetModuleVariableName(WrenVM* vm, int frame,
+                                                    int index);
+  friend void wrenDebugGetModuleVariable(WrenVM* vm, int frame, int index,
+                                         int slot);
   // State absorbed from the former wren::VM C++ wrapper. Only WrenVM's own
   // methods touch these.
   // ---------------------------------------------------------------------
@@ -419,58 +609,16 @@ public:
 //   [oldSize] will be zero. It should return NULL.
 void* wrenReallocate(WrenVM* vm, void* memory, size_t oldSize, size_t newSize);
 
-// Invoke the finalizer for the foreign object referenced by [foreign].
-void wrenFinalizeForeign(WrenVM* vm, ObjForeign* foreign);
-
-// Creates a new [WrenHandle] for [value].
-WrenHandle* wrenMakeHandle(WrenVM* vm, Value value);
-
-// Compile [source] in the context of [module] and wrap in a fiber that can
-// execute it.
-//
-// Returns NULL if a compile error occurred.
-ObjClosure* wrenCompileSource(WrenVM* vm, const char* module,
-                              const char* source, bool isExpression,
-                              bool printErrors);
-
-// Looks up a variable from a previously-loaded module.
-//
-// Aborts the current fiber if the module or variable could not be found.
-Value wrenGetModuleVariable(WrenVM* vm, Value moduleName, Value variableName);
-
-// Returns the value of the module-level variable named [name] in the main
-// module.
-Value wrenFindVariable(WrenVM* vm, ObjModule* module, const char* name);
-
-// Adds a new implicitly declared top-level variable named [name] to [module]
-// based on a use site occurring on [line].
-//
-// Does not check to see if a variable with that name is already declared or
-// defined. Returns the symbol for the new variable or -2 if there are too many
-// variables defined.
-int wrenDeclareVariable(WrenVM* vm, ObjModule* module, const char* name,
-                        size_t length, int line);
-
-// Adds a new top-level variable named [name] to [module], and optionally
-// populates line with the line of the implicit first use (line can be NULL).
-//
-// Returns the symbol for the new variable, -1 if a variable with the given name
-// is already defined, or -2 if there are too many variables defined.
-// Returns -3 if this is a top-level lowercase variable (localname) that was
-// used before being defined.
-int wrenDefineVariable(WrenVM* vm, ObjModule* module, const char* name,
-                       size_t length, Value value, int* line);
-
 // Pushes [closure] onto [fiber]'s callstack to invoke it. Expects [numArgs]
 // arguments (including the receiver) to be on the top of the stack already.
-static inline void wrenCallFunction(WrenVM* vm, ObjFiber* fiber,
-                                    ObjClosure* closure, int numArgs)
+inline void WrenVM::CallFunction(ObjFiber* fiber,
+                                   ObjClosure* closure, int numArgs)
 {
   // Grow the call frame array if needed.
   if (fiber->numFrames + 1 > fiber->frameCapacity)
   {
     int max = fiber->frameCapacity * 2;
-    fiber->frames = (CallFrame*)wrenReallocate(vm, fiber->frames,
+    fiber->frames = (CallFrame*)Reallocate(fiber->frames,
         sizeof(CallFrame) * fiber->frameCapacity, sizeof(CallFrame) * max);
     fiber->frameCapacity = max;
   }
@@ -478,47 +626,41 @@ static inline void wrenCallFunction(WrenVM* vm, ObjFiber* fiber,
   // Grow the stack if needed.
   int stackSize = (int)(fiber->stackTop - fiber->stack);
   int needed = stackSize + closure->fn->maxSlots;
-  wrenEnsureStack(vm, fiber, needed);
+  wrenEnsureStack(this, fiber, needed);
   
-  wrenAppendCallFrame(vm, fiber, closure, fiber->stackTop - numArgs);
+  wrenAppendCallFrame(this, fiber, closure, fiber->stackTop - numArgs);
 }
 
 // Closes any open upvalues that have been created for stack slots at [last]
 // and above in [fiber].
 void wrenCloseUpvalues(ObjFiber* fiber, Value* last);
 
-// Marks [obj] as a GC root so that it doesn't get collected.
-void wrenPushRoot(WrenVM* vm, Obj* obj);
-
-// Removes the most recently pushed temporary root.
-void wrenPopRoot(WrenVM* vm);
-
 // Returns the class of [value].
 //
 // Defined here instead of in wren_value.h because it's critical that this be
 // inlined. That means it must be defined in the header, but the wren_value.h
 // header doesn't have a full definitely of WrenVM yet.
-static inline ObjClass* wrenGetClassInline(WrenVM* vm, Value value)
+inline ObjClass* WrenVM::GetClassInline(Value value)
 {
-  if (IS_NUM(value)) return vm->numClass;
+  if (IS_NUM(value)) return numClass;
   if (IS_OBJ(value)) return AS_OBJ(value)->classObj;
 
 #if WREN_NAN_TAGGING
   switch (GET_TAG(value))
   {
-    case TAG_FALSE:     return vm->boolClass; break;
-    case TAG_NAN:       return vm->numClass; break;
-    case TAG_NULL:      return vm->nullClass; break;
-    case TAG_TRUE:      return vm->boolClass; break;
+    case TAG_FALSE:     return boolClass; break;
+    case TAG_NAN:       return numClass; break;
+    case TAG_NULL:      return nullClass; break;
+    case TAG_TRUE:      return boolClass; break;
     case TAG_UNDEFINED: UNREACHABLE();
   }
 #else
   switch (value.type)
   {
-    case VAL_FALSE:     return vm->boolClass;
-    case VAL_NULL:      return vm->nullClass;
-    case VAL_NUM:       return vm->numClass;
-    case VAL_TRUE:      return vm->boolClass;
+    case VAL_FALSE:     return boolClass;
+    case VAL_NULL:      return nullClass;
+    case VAL_NUM:       return numClass;
+    case VAL_TRUE:      return boolClass;
     case VAL_OBJ:       return AS_OBJ(value)->classObj;
     case VAL_UNDEFINED: UNREACHABLE();
   }

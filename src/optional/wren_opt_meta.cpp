@@ -22,7 +22,7 @@ void metaCompile(WrenVM* vm)
   ObjFn* fn = currentFiber->frames[currentFiber->numFrames - 2].closure->fn;
   ObjString* module = fn->module->name;
 
-  ObjClosure* closure = wrenCompileSource(vm, module->value, source,
+  ObjClosure* closure = vm->CompileSource( module->value, source,
                                           isExpression, printErrors);
   
   // Return the result. We can't use the public API for this since we have a

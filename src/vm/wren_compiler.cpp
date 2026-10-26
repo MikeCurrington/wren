@@ -504,9 +504,9 @@ static int addConstant(Compiler* compiler, Value constant)
   // It's a new constant.
   if (compiler->fn->constants.size() < MAX_CONSTANTS)
   {
-    if (IS_OBJ(constant)) wrenPushRoot(compiler->parser->vm, AS_OBJ(constant));
+    if (IS_OBJ(constant)) compiler->parser->vm->PushRoot( AS_OBJ(constant));
     compiler->fn->constants.push_back(constant);
-    if (IS_OBJ(constant)) wrenPopRoot(compiler->parser->vm);
+    if (IS_OBJ(constant)) compiler->parser->vm->PopRoot();
     
     if (compiler->constants == nullptr)
     {
@@ -1427,7 +1427,7 @@ static int declareVariable(Compiler* compiler, Token* token)
   if (compiler->scopeDepth == -1)
   {
     int line = -1;
-    int symbol = wrenDefineVariable(compiler->parser->vm,
+    int symbol = compiler->parser->vm->DefineVariable(
                                     compiler->parser->module,
                                     token->start, token->length,
                                     NULL_VAL, &line);
@@ -2431,7 +2431,7 @@ static void name(Compiler* compiler, bool canAssign)
   {
     // Implicitly define a module-level variable in
     // the hopes that we get a real definition later.
-    variable.index = wrenDeclareVariable(compiler->parser->vm,
+    variable.index = compiler->parser->vm->DeclareVariable(
                                          compiler->parser->module,
                                          token->start, token->length,
                                          token->line);
@@ -3990,9 +3990,9 @@ static void addToAttributeGroup(Compiler* compiler,
 {
   WrenVM* vm = compiler->parser->vm;
 
-  if(IS_OBJ(group)) wrenPushRoot(vm, AS_OBJ(group));
-  if(IS_OBJ(key))   wrenPushRoot(vm, AS_OBJ(key));
-  if(IS_OBJ(value)) wrenPushRoot(vm, AS_OBJ(value));
+  if(IS_OBJ(group)) vm->PushRoot( AS_OBJ(group));
+  if(IS_OBJ(key))   vm->PushRoot( AS_OBJ(key));
+  if(IS_OBJ(value)) vm->PushRoot( AS_OBJ(value));
 
   Value groupMapValue = wrenMapGet(compiler->attributes, group);
   if(IS_UNDEFINED(groupMapValue)) 
@@ -4018,9 +4018,9 @@ static void addToAttributeGroup(Compiler* compiler,
   ObjList* keyItems = AS_LIST(keyItemsValue);
   keyItems->elements.push_back(value);
 
-  if(IS_OBJ(group)) wrenPopRoot(vm);
-  if(IS_OBJ(key))   wrenPopRoot(vm);
-  if(IS_OBJ(value)) wrenPopRoot(vm);
+  if(IS_OBJ(group)) vm->PopRoot();
+  if(IS_OBJ(key))   vm->PopRoot();
+  if(IS_OBJ(value)) vm->PopRoot();
 }
 
 
@@ -4144,7 +4144,7 @@ static void copyMethodAttributes(Compiler* compiler, bool isForeign,
   
   // Make a map for this method to copy into
   ObjMap* methodAttr = wrenConstruct<ObjMap>(vm, 0);
-  wrenPushRoot(vm, (Obj*)methodAttr);
+  vm->PushRoot( (Obj*)methodAttr);
   copyAttributes(compiler, methodAttr);
 
   // Include 'foreign static ' in front as needed
@@ -4166,5 +4166,5 @@ static void copyMethodAttributes(Compiler* compiler, bool isForeign,
   Value key = wrenNewStringLength(vm, fullSignatureWithPrefix, fullLength);
   wrenMapSet(vm, compiler->enclosingClass->methodAttributes, key, OBJ_VAL(methodAttr));
 
-  wrenPopRoot(vm);
+  vm->PopRoot();
 }

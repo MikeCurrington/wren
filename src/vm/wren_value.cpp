@@ -85,15 +85,15 @@ ObjClass* wrenNewClass(WrenVM* vm, ObjClass* superclass, int numFields,
 {
   // Create the metaclass.
   Value metaclassName = wrenStringFormat(vm, "@ metaclass", OBJ_VAL(name));
-  wrenPushRoot(vm, AS_OBJ(metaclassName));
+  vm->PushRoot( AS_OBJ(metaclassName));
 
   ObjClass* metaclass = wrenNewSingleClass(vm, 0, AS_STRING(metaclassName));
   metaclass->classObj = vm->classClass;
 
-  wrenPopRoot(vm);
+  vm->PopRoot();
 
   // Make sure the metaclass isn't collected when we allocate the class.
-  wrenPushRoot(vm, (Obj*)metaclass);
+  vm->PushRoot( (Obj*)metaclass);
 
   // Metaclasses always inherit Class and do not parallel the non-metaclass
   // hierarchy.
@@ -103,13 +103,13 @@ ObjClass* wrenNewClass(WrenVM* vm, ObjClass* superclass, int numFields,
 
   // Make sure the class isn't collected while the inherited methods are being
   // bound.
-  wrenPushRoot(vm, (Obj*)classObj);
+  vm->PushRoot( (Obj*)classObj);
 
   classObj->classObj = metaclass;
   wrenBindSuperclass(vm, classObj, superclass);
 
-  wrenPopRoot(vm);
-  wrenPopRoot(vm);
+  vm->PopRoot();
+  vm->PopRoot();
 
   return classObj;
 }
@@ -156,7 +156,7 @@ ObjFiber::ObjFiber(WrenVM* vm, ObjClosure* _closure)
   state = FIBER_OTHER;
 
   // Keep the fiber from being swept while its arrays are allocated.
-  wrenPushRoot(vm, this);
+  vm->PushRoot( this);
 
   frames = ALLOCATE_ARRAY(vm, CallFrame, INITIAL_CALL_FRAMES);
   frameCapacity = INITIAL_CALL_FRAMES;
@@ -180,7 +180,7 @@ ObjFiber::ObjFiber(WrenVM* vm, ObjClosure* _closure)
     stackTop++;
   }
 
-  wrenPopRoot(vm);
+  vm->PopRoot();
 }
 
 void wrenEnsureStack(WrenVM* vm, ObjFiber* fiber, int needed)
@@ -278,12 +278,12 @@ ObjList::ObjList(WrenVM* vm, uint32_t numElements)
 
 void wrenListInsert(WrenVM* vm, ObjList* list, Value value, uint32_t index)
 {
-  if (IS_OBJ(value)) wrenPushRoot(vm, AS_OBJ(value));
+  if (IS_OBJ(value)) vm->PushRoot( AS_OBJ(value));
 
   // Add a slot at the end of the list.
   list->elements.push_back(NULL_VAL);
 
-  if (IS_OBJ(value)) wrenPopRoot(vm);
+  if (IS_OBJ(value)) vm->PopRoot();
 
   // Shift the existing elements down.
   for (uint32_t i = list->elements.size() - 1; i > index; i--)
@@ -299,7 +299,7 @@ Value wrenListRemoveAt(WrenVM* vm, ObjList* list, uint32_t index)
 {
   Value removed = list->elements[index];
 
-  if (IS_OBJ(removed)) wrenPushRoot(vm, AS_OBJ(removed));
+  if (IS_OBJ(removed)) vm->PushRoot( AS_OBJ(removed));
 
   // Shift items up.
   for (int i = index; i < list->elements.size() - 1; i++)
@@ -313,7 +313,7 @@ Value wrenListRemoveAt(WrenVM* vm, ObjList* list, uint32_t index)
     list->elements.shrink_to_fit();
   }
 
-  if (IS_OBJ(removed)) wrenPopRoot(vm);
+  if (IS_OBJ(removed)) vm->PopRoot();
 
   list->elements.pop_back();
   return removed;
@@ -575,7 +575,7 @@ Value wrenMapRemoveKey(WrenVM* vm, ObjMap* map, Value key)
   entry->key = UNDEFINED_VAL;
   entry->value = TRUE_VAL;
 
-  if (IS_OBJ(value)) wrenPushRoot(vm, AS_OBJ(value));
+  if (IS_OBJ(value)) vm->PushRoot( AS_OBJ(value));
 
   map->count--;
 
@@ -595,7 +595,7 @@ Value wrenMapRemoveKey(WrenVM* vm, ObjMap* map, Value key)
     resizeMap(vm, map, capacity);
   }
 
-  if (IS_OBJ(value)) wrenPopRoot(vm);
+  if (IS_OBJ(value)) vm->PopRoot();
   return value;
 }
 
@@ -1201,7 +1201,7 @@ void wrenFreeObj(WrenVM* vm, Obj* obj)
     }
 
     case OBJ_FOREIGN:
-      wrenFinalizeForeign(vm, (ObjForeign*)obj);
+      vm->FinalizeForeign( (ObjForeign*)obj);
       break;
 
     case OBJ_LIST:
@@ -1230,7 +1230,7 @@ void wrenFreeObj(WrenVM* vm, Obj* obj)
 
 ObjClass* wrenGetClass(WrenVM* vm, Value value)
 {
-  return wrenGetClassInline(vm, value);
+  return vm->GetClassInline( value);
 }
 
 bool wrenValuesEqual(Value a, Value b)

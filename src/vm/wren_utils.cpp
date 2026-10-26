@@ -7,9 +7,9 @@ int SymbolTable::add(WrenVM* vm, const char* name, size_t length)
 {
   ObjString* symbol = AS_STRING(wrenNewStringLength(vm, name, length));
 
-  wrenPushRoot(vm, symbol);
+  vm->PushRoot( symbol);
   buffer_.push_back(symbol);
-  wrenPopRoot(vm);
+  vm->PopRoot();
 
   return buffer_.size() - 1;
 }
