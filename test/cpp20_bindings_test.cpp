@@ -171,6 +171,11 @@ class Host {
 public:
   // shared_ptr parameter: writes through to the caller's instance.
   void absorb(std::shared_ptr<Node> node, int add) { node->value += add; }
+  // weak_ptr parameter: same conversion, non-owning view.
+  int peek(const std::weak_ptr<Node>& node) const {
+    if (std::shared_ptr<Node> p = node.lock()) return p->value;
+    return -1;
+  }
 };
 
 // Last values seen by the C++ side of the variant test.
@@ -659,6 +664,7 @@ System.print("bumped to %(w.counter)")
     auto host = mod.klass<Host>("Host");
     host.ctor<>();
     host.func<&Host::absorb, std::shared_ptr<Node>, int>("absorb");
+    host.func<&Host::peek, std::weak_ptr<Node>>("peek");
   }
 
   const char* test15Source = R"WREN(
@@ -669,6 +675,7 @@ n.value = 10
 var h = Host.new()
 h.absorb(n, 5)
 System.print("value after absorb: %(n.value)")
+System.print("peek: %(h.peek(n))")
 )WREN";
 
   result = vm.Interpret("test15", test15Source);

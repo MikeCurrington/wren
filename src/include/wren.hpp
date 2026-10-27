@@ -227,6 +227,13 @@ template <typename T> struct is_shared_ptr<std::shared_ptr<T>> : std::true_type 
 template <typename T>
 inline constexpr bool is_shared_ptr_v = is_shared_ptr<std::decay_t<T>>::value;
 
+// Helper for weak_ptr detection (parameters only; a weak_ptr argument
+// receives the payload's shared ownership and converts implicitly).
+template <typename T> struct is_weak_ptr : std::false_type {};
+template <typename T> struct is_weak_ptr<std::weak_ptr<T>> : std::true_type {};
+template <typename T>
+inline constexpr bool is_weak_ptr_v = is_weak_ptr<std::decay_t<T>>::value;
+
 // Helper for std::variant detection.
 template <typename T> struct is_variant : std::false_type {};
 template <typename... Ts> struct is_variant<std::variant<Ts...>> : std::true_type {};
@@ -268,11 +275,12 @@ inline decltype(auto) getArg(WrenVM* vm, int slot) {
   using D = std::decay_t<T>;
   if constexpr (isWrenBuiltin_v<D> || is_variant_v<D> || is_slot_value_v<D>) {
     return Converter<D>::get(vm, slot);
-  } else if constexpr (is_shared_ptr_v<D>) {
-    // shared_ptr argument: share the payload's ownership. The cast is
-    // unchecked (static_pointer_cast off the shared_ptr<void> payload) —
-    // polymorphic passes rely on the payload being the exact type or a
-    // single-inheritance layout.
+  } else if constexpr (is_shared_ptr_v<D> || is_weak_ptr_v<D>) {
+    // shared_ptr/weak_ptr argument: share the payload's ownership (a
+    // weak_ptr parameter converts implicitly). The cast is unchecked
+    // (static_pointer_cast off the shared_ptr<void> payload) — polymorphic
+    // passes rely on the payload being the exact type or a single-
+    // inheritance layout.
     return getForeignShared<typename D::element_type>(vm, slot);
   } else if constexpr (std::is_pointer_v<D>) {
     // Pointer argument: return address of the foreign object
