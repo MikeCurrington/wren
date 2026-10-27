@@ -505,9 +505,15 @@ public:
 
   // Install a raw allocate function instead of the generated constructor
   // trampolines — for allocators that can't be expressed as a C++
-  // constructor call, e.g. one that aborts the fiber.
-  Foreign<T>& allocatorRaw(WrenForeignMethodFn allocate) {
+  // constructor call, e.g. one that aborts the fiber, or one that reads
+  // raw slot values (handles, variants). [ctorArgCount], when >= 0, also
+  // declares a constructor of that arity in the class source; the raw
+  // allocator reads the arguments from the slots itself.
+  Foreign<T>& allocatorRaw(WrenForeignMethodFn allocate, int ctorArgCount = -1) {
     reg_.allocator = allocate;
+    if (ctorArgCount >= 0) {
+      reg_.ctorArgCounts.push_back(ctorArgCount);
+    }
     return *this;
   }
 
@@ -528,6 +534,16 @@ public:
       true,
       detail::makeMethodSig(name, sizeof...(Args), true)
     });
+    return *this;
+  }
+
+  // Register a hand-written trampoline under [signature] (bind form, e.g.
+  // "foo(_,_)", "trigger()" or "[_]"). For methods whose slot handling the
+  // template builders can't express: variant arguments, shared_ptr
+  // parameters, Wren values captured with wrenGetSlotHandle, and so on.
+  Foreign<T>& funcRaw(std::string_view signature, WrenForeignMethodFn fn,
+                      bool isStatic = false) {
+    reg_.methods.push_back({fn, isStatic, std::string(signature)});
     return *this;
   }
 
@@ -688,7 +704,14 @@ public:
       std::string prefix = m.isStatic ? "static " : "";
       // Convert bind signature (e.g. "dot(_,_)") to Wren source (e.g. "dot(arg0,arg1)")
       std::string wrenSig = m.signature;
-      bool isZeroArg = (wrenSig.find('(') == std::string::npos);
+      // Only plain getter-style names can be declared twice (bare and with
+      // "()"); a "()" form of a subscript ("[_]"), setter ("foo=(_)") or
+      // operator signature is a compile error in Wren.
+      bool isGetterStyle = !m.signature.empty() &&
+          m.signature.find_first_not_of(
+              "abcdefghijklmnopqrstuvwxyz"
+              "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_") ==
+              std::string::npos;
       std::string::size_type pos = 0;
       int argIdx = 0;
       while ((pos = wrenSig.find('_', pos)) != std::string::npos) {
@@ -697,9 +720,9 @@ public:
         pos += argName.size();
       }
       src += "  foreign " + prefix + wrenSig + "\n";
-      // For 0-arg methods, also generate the "()" call form so both
+      // For getter-style methods, also generate the "()" call form so both
       // `obj.foo` (getter) and `obj.foo()` (method call) work.
-      if (isZeroArg) {
+      if (isGetterStyle) {
         src += "  foreign " + prefix + wrenSig + "()\n";
       }
     }
