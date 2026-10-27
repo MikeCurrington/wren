@@ -150,7 +150,9 @@ static void ensureOutsideForeign(WrenVM* vm)
 
 static void foreignClassAllocate(WrenVM* vm)
 {
-  wrenSetSlotNewForeign(vm, 0, 0, 4);
+  // The ForeignType instance carries no payload; the tests only use it to
+  // check slot types.
+  vm->SetSlotNewForeignShared(0, 0, {}, nullptr);
 }
 
 static void getListCount(WrenVM* vm)

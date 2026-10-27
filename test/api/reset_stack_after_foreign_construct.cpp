@@ -1,12 +1,15 @@
 #include <stdio.h>
 #include <string.h>
+#include <memory>
 
 #include "wren.h"
+#include "wren_vm.h"
 
 static void counterAllocate(WrenVM* vm)
 {
-  double* counter = (double*)wrenSetSlotNewForeign(vm, 0, 0, sizeof(double));
-  *counter = wrenGetSlotDouble(vm, 1);
+  vm->SetSlotNewForeignShared(0, 0,
+      std::shared_ptr<double>(new double(wrenGetSlotDouble(vm, 1)),
+          std::default_delete<double>()), nullptr);
 }
 
 void resetStackAfterForeignConstructBindClass(

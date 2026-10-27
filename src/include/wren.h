@@ -89,8 +89,8 @@ typedef struct
 {
   // The callback invoked when the foreign object is created.
   //
-  // This must be provided. Inside the body of this, it must call
-  // [wrenSetSlotNewForeign()] exactly once.
+  // This must be provided. Inside the body of this, it must create the
+  // instance by calling WrenVM::SetSlotNewForeignShared() exactly once.
   WrenForeignMethodFn allocate;
 
   // The callback invoked when the garbage collector is about to collect a
@@ -390,13 +390,6 @@ WREN_API const char* wrenGetSlotBytes(WrenVM* vm, int slot, int* length);
 // It is an error to call this if the slot does not contain a number.
 WREN_API double wrenGetSlotDouble(WrenVM* vm, int slot);
 
-// Reads a foreign object from [slot] and returns a pointer to the foreign data
-// stored with it.
-//
-// It is an error to call this if the slot does not contain an instance of a
-// foreign class.
-WREN_API void* wrenGetSlotForeign(WrenVM* vm, int slot);
-
 // Reads a string from [slot].
 //
 // The memory for the returned string is owned by Wren. You can inspect it
@@ -423,17 +416,6 @@ WREN_API void wrenSetSlotBytes(WrenVM* vm, int slot, const char* bytes, size_t l
 
 // Stores the numeric [value] in [slot].
 WREN_API void wrenSetSlotDouble(WrenVM* vm, int slot, double value);
-
-// Creates a new instance of the foreign class stored in [classSlot] with [size]
-// bytes of raw storage and places the resulting object in [slot].
-//
-// This does not invoke the foreign class's constructor on the new instance. If
-// you need that to happen, call the constructor from Wren, which will then
-// call the allocator foreign method. In there, call this to create the object
-// and then the constructor will be invoked when the allocator returns.
-//
-// Returns a pointer to the foreign object's data.
-WREN_API void* wrenSetSlotNewForeign(WrenVM* vm, int slot, int classSlot, size_t size);
 
 // Stores a new empty list in [slot].
 WREN_API void wrenSetSlotNewList(WrenVM* vm, int slot);

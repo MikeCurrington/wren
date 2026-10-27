@@ -4,6 +4,8 @@
 #include <new>
 #include <stddef.h>
 #include <string.h>
+#include <memory>
+#include <typeinfo>
 #include <utility>
 #include <vector>
 
@@ -508,10 +510,18 @@ struct ObjClass : public Obj
 
 struct ObjForeign : public Obj
 {
-  // Creates a new foreign object of [size] bytes of zeroed-out data.
-  ObjForeign(WrenVM* vm, ObjClass* _classObj, size_t size);
+  // Creates a new foreign object with no payload yet. The host's allocate
+  // callback fills in [data] (and optionally [type]) before returning.
+  ObjForeign(WrenVM* vm, ObjClass* _classObj);
 
-  uint8_t data[FLEXIBLE_ARRAY];
+  // The payload the object owns. Shared ownership: the host may hold its own
+  // reference to keep the payload alive past garbage collection. Released
+  // when the object is collected.
+  std::shared_ptr<void> data;
+
+  // Static type of the payload, recorded when the host that created it knows
+  // it. May be null (the raw C API does not set it).
+  const std::type_info* type = nullptr;
 };
 
 struct ObjInstance : public Obj

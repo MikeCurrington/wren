@@ -378,6 +378,10 @@
 
   std::string TestVM::LoadModule(std::string_view module)
   {
+    // Modules registered from C++ take precedence over files on disk.
+    std::string registered = WrenVM::LoadModule(module);
+    if (!registered.empty()) return registered;
+
     #ifdef WREN_TRY
       return std::string();
     #endif
@@ -399,16 +403,21 @@
   WrenForeignMethodFn TestVM::BindForeignMethod(const char* module,
       const char* className, bool isStatic, const char* signature)
   {
-    if (!isAPITest_) return nullptr;
-    return APITest_bindForeignMethod(this, module, className, isStatic, signature);
+    WrenForeignMethodFn method = nullptr;
+    if (isAPITest_) method = APITest_bindForeignMethod(this, module, className, isStatic, signature);
+    // Fall through to modules registered from C++.
+    if (method == nullptr) method = WrenVM::BindForeignMethod(module, className, isStatic, signature);
+    return method;
   }
 
   WrenForeignClassMethods TestVM::BindForeignClass(const char* module,
                                                    const char* className)
   {
     WrenForeignClassMethods methods{nullptr, nullptr};
-    if (!isAPITest_) return methods;
-    return APITest_bindForeignClass(this, module, className);
+    if (isAPITest_) methods = APITest_bindForeignClass(this, module, className);
+    // Fall through to modules registered from C++.
+    if (methods.allocate == nullptr) methods = WrenVM::BindForeignClass(module, className);
+    return methods;
   }
 
 //main helpers

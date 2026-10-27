@@ -39,13 +39,13 @@ static uint32_t advanceState(Well512* well)
 
 static void randomAllocate(WrenVM* vm)
 {
-  Well512* well = (Well512*)wrenSetSlotNewForeign(vm, 0, 0, sizeof(Well512));
-  well->index = 0;
+  // make_shared value-initializes, so the state array starts zeroed.
+  vm->SetSlotNewForeignShared(0, 0, std::make_shared<Well512>(), nullptr);
 }
 
 static void randomSeed0(WrenVM* vm)
 {
-  Well512* well = (Well512*)wrenGetSlotForeign(vm, 0);
+  Well512* well = static_cast<Well512*>(vm->GetSlotForeign(0));
 
   srand((uint32_t)time(nullptr));
   for (int i = 0; i < 16; i++)
@@ -56,7 +56,7 @@ static void randomSeed0(WrenVM* vm)
 
 static void randomSeed1(WrenVM* vm)
 {
-  Well512* well = (Well512*)wrenGetSlotForeign(vm, 0);
+  Well512* well = static_cast<Well512*>(vm->GetSlotForeign(0));
 
   srand((uint32_t)wrenGetSlotDouble(vm, 1));
   for (int i = 0; i < 16; i++)
@@ -67,7 +67,7 @@ static void randomSeed1(WrenVM* vm)
 
 static void randomSeed16(WrenVM* vm)
 {
-  Well512* well = (Well512*)wrenGetSlotForeign(vm, 0);
+  Well512* well = static_cast<Well512*>(vm->GetSlotForeign(0));
 
   for (int i = 0; i < 16; i++)
   {
@@ -77,7 +77,7 @@ static void randomSeed16(WrenVM* vm)
 
 static void randomFloat(WrenVM* vm)
 {
-  Well512* well = (Well512*)wrenGetSlotForeign(vm, 0);
+  Well512* well = static_cast<Well512*>(vm->GetSlotForeign(0));
 
   // A double has 53 bits of precision in its mantissa, and we'd like to take
   // full advantage of that, so we need 53 bits of random source data.
@@ -97,7 +97,7 @@ static void randomFloat(WrenVM* vm)
 
 static void randomInt0(WrenVM* vm)
 {
-  Well512* well = (Well512*)wrenGetSlotForeign(vm, 0);
+  Well512* well = static_cast<Well512*>(vm->GetSlotForeign(0));
 
   wrenSetSlotDouble(vm, 0, (double)advanceState(well));
 }

@@ -115,7 +115,7 @@ namespace debug
         case OBJ_FOREIGN:
         {
           const ObjClass* classObj = obj->classObj;
-          return std::format("{} @ {:p}", (const char*const)classObj->name->value, (const void*)AS_FOREIGN(value)->data);
+          return std::format("{} @ {:p}", (const char*const)classObj->name->value, AS_FOREIGN(value)->data.get());
         }
 
         default:
@@ -688,7 +688,12 @@ namespace debug
         bool isForeign = IS_OBJ(value) && AS_OBJ(value)->type == OBJ_FOREIGN;
         if (isForeign)
         {
-          foreign.data = AS_FOREIGN(value)->data;
+          // Hold a reference so the payload can't be collected while the
+          // debugger is inspecting it, and surface the static type tag if
+          // the host that created the object recorded one.
+          foreign.data = AS_FOREIGN(value)->data.get();
+          foreign.tag = AS_FOREIGN(value)->type;
+          foreign.keepAlive = AS_FOREIGN(value)->data;
           foreign.wrenClassName = dapType(value);
           if (foreignProvider_.summarize != nullptr)
           {

@@ -227,12 +227,9 @@ void WrenVM::EnsureStack(ObjFiber* fiber, int needed)
   }
 }
 
-ObjForeign::ObjForeign(WrenVM* vm, ObjClass* _classObj, size_t size)
+ObjForeign::ObjForeign(WrenVM* vm, ObjClass* _classObj)
   : Obj(vm, OBJ_FOREIGN, _classObj)
-{
-  // Zero out the bytes.
-  memset(data, 0, size);
-}
+{}
 
 FnDebug::FnDebug(WrenVM*)
 {
@@ -1202,6 +1199,9 @@ void WrenVM::FreeObj(Obj* obj)
 
     case OBJ_FOREIGN:
       this->FinalizeForeign( (ObjForeign*)obj);
+      // FreeObj releases memory through the VM allocator without running
+      // destructors, so the payload's shared_ptr must be released here.
+      ((ObjForeign*)obj)->data = {};
       break;
 
     case OBJ_LIST:

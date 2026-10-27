@@ -850,7 +850,7 @@ void WrenVM::FinalizeForeign(ObjForeign* foreign)
   ASSERT(method->type == METHOD_FOREIGN, "Finalizer should be foreign.");
 
   WrenFinalizerFn finalizer = (WrenFinalizerFn)method->as.foreign;
-  finalizer(foreign->data);
+  finalizer(foreign->data.get());
 }
 
 // Lets the host resolve an imported module name if it wants to.
@@ -1973,6 +1973,15 @@ void* WrenVM::GetSlotForeign(int slot)
   ASSERT(IS_FOREIGN(this->apiStack[slot]),
          "Slot must hold a foreign instance.");
 
+  return AS_FOREIGN(this->apiStack[slot])->data.get();
+}
+
+std::shared_ptr<void> WrenVM::GetSlotForeignShared(int slot)
+{
+  ValidateApiSlot(slot);
+  ASSERT(IS_FOREIGN(this->apiStack[slot]),
+         "Slot must hold a foreign instance.");
+
   return AS_FOREIGN(this->apiStack[slot])->data;
 }
 
@@ -2013,19 +2022,21 @@ void WrenVM::SetSlotDouble(int slot, double value)
   SetSlot(slot, NUM_VAL(value));
 }
 
-void* WrenVM::SetSlotNewForeign(int slot, int classSlot, size_t size)
+void WrenVM::SetSlotNewForeignShared(int slot, int classSlot,
+                                     std::shared_ptr<void> object,
+                                     const std::type_info* type)
 {
   ValidateApiSlot(slot);
   ValidateApiSlot(classSlot);
   ASSERT(IS_CLASS(this->apiStack[classSlot]), "Slot must hold a class.");
-  
+
   ObjClass* classObj = AS_CLASS(this->apiStack[classSlot]);
   ASSERT(classObj->numFields == -1, "Class must be a foreign class.");
-  
-  ObjForeign* foreign = wrenConstruct<ObjForeign>(this, size, classObj, size);
+
+  ObjForeign* foreign = wrenConstruct<ObjForeign>(this, 0, classObj);
+  foreign->data = std::move(object);
+  foreign->type = type;
   this->apiStack[slot] = OBJ_VAL(foreign);
-  
-  return (void*)foreign->data;
 }
 
 void WrenVM::SetSlotNewList(int slot)
@@ -2275,13 +2286,11 @@ WrenType wrenGetSlotType(const WrenVM* vm, int slot) { return vm->SlotType(slot)
 bool wrenGetSlotBool(WrenVM* vm, int slot) { return vm->GetSlotBool(slot); }
 const char* wrenGetSlotBytes(WrenVM* vm, int slot, int* length) { return vm->GetSlotBytes(slot, length); }
 double wrenGetSlotDouble(WrenVM* vm, int slot) { return vm->GetSlotDouble(slot); }
-void* wrenGetSlotForeign(WrenVM* vm, int slot) { return vm->GetSlotForeign(slot); }
 const char* wrenGetSlotString(WrenVM* vm, int slot) { return vm->GetSlotString(slot); }
 WrenHandle* wrenGetSlotHandle(WrenVM* vm, int slot) { return vm->GetSlotHandle(slot); }
 void wrenSetSlotBool(WrenVM* vm, int slot, bool value) { vm->SetSlotBool(slot, value); }
 void wrenSetSlotBytes(WrenVM* vm, int slot, const char* bytes, size_t length) { vm->SetSlotBytes(slot, bytes, length); }
 void wrenSetSlotDouble(WrenVM* vm, int slot, double value) { vm->SetSlotDouble(slot, value); }
-void* wrenSetSlotNewForeign(WrenVM* vm, int slot, int classSlot, size_t size) { return vm->SetSlotNewForeign(slot, classSlot, size); }
 void wrenSetSlotNewList(WrenVM* vm, int slot) { vm->SetSlotNewList(slot); }
 void wrenSetSlotNewMap(WrenVM* vm, int slot) { vm->SetSlotNewMap(slot); }
 void wrenSetSlotNull(WrenVM* vm, int slot) { vm->SetNull(slot); }

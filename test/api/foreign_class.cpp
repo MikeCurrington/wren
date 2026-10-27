@@ -1,130 +1,147 @@
-#include <stdio.h>
-#include <string.h>
+// Foreign class bindings for test/api/foreign_class.wren, registered through
+// the C++20 bindings API (wren.hpp) as the "foreign_classes" module. The Wren
+// class declarations are served verbatim from the module source so the test
+// script's expectations stay unchanged.
+
+#include <cstdio>
+#include <string>
 
 #include "foreign_class.h"
+#include "wren.hpp"
 
-static int finalized = 0;
+namespace {
 
-static void apiFinalized(WrenVM* vm)
+int finalized = 0;
+
+class Counter
 {
-  wrenSetSlotDouble(vm, 0, finalized);
-}
+public:
+  void increment(double amount) { value += amount; }
+  double getValue() const { return value; }
 
-static void counterAllocate(WrenVM* vm)
+private:
+  double value = 0.0;
+};
+
+class Point
 {
-  double* value = (double*)wrenSetSlotNewForeign(vm, 0, 0, sizeof(double));
-  *value = 0;
-}
+public:
+  Point() : coordinates{0.0, 0.0, 0.0} {}
+  Point(double x, double y, double z) : coordinates{x, y, z} {}
 
-static void counterIncrement(WrenVM* vm)
-{
-  double* value = (double*)wrenGetSlotForeign(vm, 0);
-  double increment = wrenGetSlotDouble(vm, 1);
-
-  *value += increment;
-}
-
-static void counterValue(WrenVM* vm)
-{
-  double value = *(double*)wrenGetSlotForeign(vm, 0);
-  wrenSetSlotDouble(vm, 0, value);
-}
-
-static void pointAllocate(WrenVM* vm)
-{
-  double* coordinates = (double*)wrenSetSlotNewForeign(vm, 0, 0, sizeof(double[3]));
-
-  // This gets called by both constructors, so sniff the slot count to see
-  // which one was invoked.
-  if (wrenGetSlotCount(vm) == 1)
+  void translate(double x, double y, double z)
   {
-    coordinates[0] = 0.0;
-    coordinates[1] = 0.0;
-    coordinates[2] = 0.0;
+    coordinates[0] += x;
+    coordinates[1] += y;
+    coordinates[2] += z;
   }
-  else
+
+  std::string toString() const
   {
-    coordinates[0] = wrenGetSlotDouble(vm, 1);
-    coordinates[1] = wrenGetSlotDouble(vm, 2);
-    coordinates[2] = wrenGetSlotDouble(vm, 3);
+    char result[100];
+    snprintf(result, sizeof(result), "(%g, %g, %g)",
+        coordinates[0], coordinates[1], coordinates[2]);
+    return result;
   }
-}
 
-static void pointTranslate(WrenVM* vm)
+private:
+  double coordinates[3];
+};
+
+class Resource
 {
-  double* coordinates = (double*)wrenGetSlotForeign(vm, 0);
-  coordinates[0] += wrenGetSlotDouble(vm, 1);
-  coordinates[1] += wrenGetSlotDouble(vm, 2);
-  coordinates[2] += wrenGetSlotDouble(vm, 3);
-}
+public:
+  ~Resource() { finalized++; }
+};
 
-static void pointToString(WrenVM* vm)
-{
-  double* coordinates = (double*)wrenGetSlotForeign(vm, 0);
-  char result[100];
-  snprintf(result, sizeof(result), "(%g, %g, %g)",
-      coordinates[0], coordinates[1], coordinates[2]);
-  wrenSetSlotString(vm, 0, result);
-}
+// Payload-less binding targets: BadClass aborts in its allocator and
+// ForeignClass only carries a foreign static.
+struct BadClassTag {};
+struct ForeignClassTag {};
 
-static void resourceAllocate(WrenVM* vm)
-{
-  int* value = (int*)wrenSetSlotNewForeign(vm, 0, 0, sizeof(int));
-  *value = 123;
-}
-
-static void resourceFinalize(void* data)
-{
-  // Make sure we get the right data back.
-  int* value = (int*)data;
-  if (*value != 123) exit(1);
-
-  finalized++;
-}
-
-static void badClassAllocate(WrenVM* vm)
+void badClassAllocate(WrenVM* vm)
 {
   wrenEnsureSlots(vm, 1);
   wrenSetSlotString(vm, 0, "Something went wrong");
   wrenAbortFiber(vm, 0);
 }
 
-WrenForeignMethodFn foreignClassBindMethod(const char* signature)
+int finalizedCount()
 {
-  if (strcmp(signature, "static ForeignClass.finalized") == 0) return apiFinalized;
-  if (strcmp(signature, "Counter.increment(_)") == 0) return counterIncrement;
-  if (strcmp(signature, "Counter.value") == 0) return counterValue;
-  if (strcmp(signature, "Point.translate(_,_,_)") == 0) return pointTranslate;
-  if (strcmp(signature, "Point.toString") == 0) return pointToString;
-
-  return NULL;
+  return finalized;
 }
 
-void foreignClassBindClass(
-    const char* className, WrenForeignClassMethods* methods)
+} // namespace
+
+void foreignClassSetup(WrenVM* vm)
 {
-  if (strcmp(className, "Counter") == 0)
-  {
-    methods->allocate = counterAllocate;
-    return;
-  }
+  auto& module = vm->Module("foreign_classes");
 
-  if (strcmp(className, "Point") == 0)
-  {
-    methods->allocate = pointAllocate;
-    return;
-  }
+  module.source(
+      "class ForeignClass {\n"
+      "  foreign static finalized\n"
+      "}\n"
+      "\n"
+      "// Class with a default constructor.\n"
+      "foreign class Counter {\n"
+      "  construct new() {}\n"
+      "  foreign increment(amount)\n"
+      "  foreign value\n"
+      "}\n"
+      "\n"
+      "// Foreign classes can inherit a class as long as it has no fields.\n"
+      "class PointBase {\n"
+      "  inherited() {\n"
+      "    System.print(\"inherited method\")\n"
+      "  }\n"
+      "}\n"
+      "\n"
+      "// Class with non-default constructor.\n"
+      "foreign class Point is PointBase {\n"
+      "  construct new() {\n"
+      "    System.print(\"default\")\n"
+      "  }\n"
+      "\n"
+      "  construct new(x, y, z) {\n"
+      "    System.print(\"%(x), %(y), %(z)\")\n"
+      "  }\n"
+      "\n"
+      "  foreign translate(x, y, z)\n"
+      "  foreign toString\n"
+      "}\n"
+      "\n"
+      "// Class with a finalizer.\n"
+      "foreign class Resource {\n"
+      "  construct new() {}\n"
+      "}\n"
+      "\n"
+      "// Class that aborts fiber\n"
+      "foreign class BadClass {\n"
+      "  construct new() {}\n"
+      "}\n");
 
-  if (strcmp(className, "Resource") == 0)
-  {
-    methods->allocate = resourceAllocate;
-    methods->finalize = resourceFinalize;
-    return;
-  }
+  auto counter = module.klass<Counter>("Counter");
+  counter.noSource();
+  counter.ctor<>();
+  counter.func<&Counter::increment, double>("increment");
+  counter.func<&Counter::getValue>("value");
 
-  if (strcmp(className, "BadClass") == 0)
-  {
-    methods->allocate = badClassAllocate;
-    return;
-  }
+  auto point = module.klass<Point>("Point");
+  point.noSource();
+  point.ctor<>();
+  point.ctor<double, double, double>();
+  point.func<&Point::translate, double, double, double>("translate");
+  point.func<&Point::toString>("toString");
+
+  auto resource = module.klass<Resource>("Resource");
+  resource.noSource();
+  resource.ctor<>();
+
+  auto badClass = module.klass<BadClassTag>("BadClass");
+  badClass.noSource();
+  badClass.allocatorRaw(badClassAllocate);
+
+  auto foreignClass = module.klass<ForeignClassTag>("ForeignClass");
+  foreignClass.noSource();
+  foreignClass.funcStatic<&finalizedCount>("finalized");
 }

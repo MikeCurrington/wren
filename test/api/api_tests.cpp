@@ -37,9 +37,6 @@ WrenForeignMethodFn APITest_bindForeignMethod(
   method = getVariableBindMethod(fullName);
   if (method != NULL) return method;
 
-  method = foreignClassBindMethod(fullName);
-  if (method != NULL) return method;
-
   method = foreignStackMoveBindMethod(fullName);
   if (method != NULL) return method;
 
@@ -76,7 +73,7 @@ WrenForeignClassMethods APITest_bindForeignClass(
   WrenForeignClassMethods methods = { NULL, NULL };
   if (strncmp(module, "./test/api", 7) != 0) return methods;
 
-  foreignClassBindClass(className, &methods);
+  benchmarkBindClass(className, &methods);
   if (methods.allocate != NULL) return methods;
 
   callNestedBindClass(className, &methods);
@@ -95,6 +92,14 @@ WrenForeignClassMethods APITest_bindForeignClass(
           "Unknown foreign class '%s' for test '%s'\n", className, testName);
   exit(1);
   return methods;
+}
+
+void APITest_Setup(WrenVM* vm, const char* inTestName)
+{
+  if (strstr(inTestName, "/foreign_class.wren") != NULL)
+  {
+    foreignClassSetup(vm);
+  }
 }
 
 int APITest_Run(WrenVM* vm, const char* inTestName)

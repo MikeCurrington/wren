@@ -13,10 +13,11 @@
 // The underlying VM (NaN-boxing, GC, bytecode) is unchanged. This layer wraps
 // the raw C API with modern C++20 ergonomics.
 //
-// Key design: Foreign objects are stored as ForeignWrapper (shared_ptr + type tag)
-// inside Wren's foreign slots. This enables:
+// Key design: foreign objects live in the VM's ObjForeign as a shared_ptr
+// payload (with an optional type tag) — see ObjForeign in wren_value.h. The
+// VM owns a reference and releases the payload on collection, so:
 //   - Safe shared ownership across the C++↔Wren boundary
-//   - Runtime type checking when extracting foreign arguments
+//   - Automatic destruction without per-class finalizer trampolines
 //   - Passing registered foreign types as method parameters
 //
 // Template-generated static trampoline functions serve as the C function pointers
@@ -69,6 +70,10 @@ struct ClassReg {
   std::vector<int> ctorArgCounts;
   std::vector<MethodReg> methods;
   std::string wrenSource;
+  // The class is declared manually via Module::source() instead of a
+  // generated bare "foreign class" declaration. Bindings still dispatch by
+  // class name.
+  bool manualSource = false;
 };
 
 struct ModuleReg {
@@ -78,35 +83,6 @@ struct ModuleReg {
 };
 
 namespace detail {
-
-// ===========================================================================
-// ForeignWrapper — stored inside Wren's foreign slot for every C++20-managed
-// foreign object. Contains a shared_ptr to the actual object and a type tag
-// for runtime type checking.
-// ===========================================================================
-struct ForeignWrapper {
-  std::shared_ptr<void> obj;
-  const std::type_info* type = nullptr;
-
-  ForeignWrapper() = default;
-
-  template <typename T, typename... Args>
-  static ForeignWrapper make(Args&&... args) {
-    ForeignWrapper w;
-    w.obj = std::make_shared<T>(std::forward<Args>(args)...);
-    w.type = &typeid(T);
-    return w;
-  }
-
-  // Create a wrapper that shares ownership of an existing shared_ptr
-  template <typename T>
-  static ForeignWrapper share(std::shared_ptr<T> ptr) {
-    ForeignWrapper w;
-    w.obj = std::move(ptr);
-    w.type = &typeid(T);
-    return w;
-  }
-};
 
 // ===========================================================================
 // ClassId — per-type record of the module/class name a C++ type is bound to
@@ -189,20 +165,20 @@ inline constexpr bool is_shared_ptr_v = is_shared_ptr<std::decay_t<T>>::value;
 // Slot access helpers for foreign (wrapper-based) objects
 // ===========================================================================
 
-// Extract a typed reference from a foreign slot containing a ForeignWrapper.
+// Extract a typed reference from a foreign slot. The payload's shared_ptr
+// lives in the VM's ObjForeign; the pointee is returned directly.
 template <typename T>
 inline T& getForeign(WrenVM* vm, int slot) {
-  void* data = wrenGetSlotForeign(vm, slot);
-  auto* wrapper = std::launder(reinterpret_cast<ForeignWrapper*>(data));
-  return *static_cast<T*>(wrapper->obj.get());
+  void* data = vm->GetSlotForeign(slot);
+  return *static_cast<T*>(data);
 }
 
 // Extract a shared_ptr from a foreign slot — for shared ownership scenarios.
+// Shares the VM's control block, so the pointee stays alive as long as the
+// returned shared_ptr does, even if the Wren object is collected.
 template <typename T>
 inline std::shared_ptr<T> getForeignShared(WrenVM* vm, int slot) {
-  void* data = wrenGetSlotForeign(vm, slot);
-  auto* wrapper = std::launder(reinterpret_cast<ForeignWrapper*>(data));
-  return std::static_pointer_cast<T>(wrapper->obj);
+  return std::static_pointer_cast<T>(vm->GetSlotForeignShared(slot));
 }
 
 // Generic argument getter — handles builtins, foreign by-value/ref/ptr.
@@ -228,19 +204,19 @@ inline int scratchSlot(WrenVM* vm) {
 }
 
 // Fetch the Wren class registered for T (via Module::klass<T>) into a scratch
-// slot and start a new foreign object in slot 0. Returns the foreign data
-// pointer, ready for placement-new of a ForeignWrapper.
+// slot and store [object] as a new foreign instance in slot 0, recording
+// T's static type on the instance.
 template <typename T>
-inline void* newForeignInSlot0(WrenVM* vm) {
+inline void setNewForeignInSlot0(WrenVM* vm, std::shared_ptr<void> object) {
   const int classSlot = scratchSlot(vm);
   wrenEnsureSlots(vm, classSlot + 1);
   wrenGetVariable(vm, ClassId<T>::moduleName.c_str(), ClassId<T>::className.c_str(), classSlot);
-  return wrenSetSlotNewForeign(vm, 0, classSlot, sizeof(ForeignWrapper));
+  vm->SetSlotNewForeignShared(0, classSlot, std::move(object), &typeid(T));
 }
 
 // Place a return value into slot 0. Builtins use their converter; shared_ptr
 // returns share ownership of the pointee; other types are foreign values,
-// copied into a new ForeignWrapper. The Wren class needed for boxing is
+// moved into a new VM-owned payload. The Wren class needed for boxing is
 // looked up through the ClassId registry, because slot 0 holds the receiver
 // during instance method calls.
 template <typename T>
@@ -250,11 +226,9 @@ inline void setReturn(WrenVM* vm, T&& value) {
     Converter<D>::set(vm, 0, std::forward<T>(value));
   } else if constexpr (is_shared_ptr_v<D>) {
     using X = typename D::element_type;
-    void* data = newForeignInSlot0<X>(vm);
-    new (data) ForeignWrapper(ForeignWrapper::share<X>(std::forward<T>(value)));
+    setNewForeignInSlot0<X>(vm, std::shared_ptr<void>(std::forward<T>(value)));
   } else {
-    void* data = newForeignInSlot0<D>(vm);
-    new (data) ForeignWrapper(ForeignWrapper::make<D>(std::forward<T>(value)));
+    setNewForeignInSlot0<D>(vm, std::make_shared<D>(std::forward<T>(value)));
   }
 }
 
@@ -396,27 +370,20 @@ void setterTrampoline(WrenVM* vm) {
   }
 
   // --- Constructor (allocator) trampoline ---
-// Creates a shared_ptr<T> and stores it in a ForeignWrapper in the foreign slot.
+// Creates the C++ object and hands it to the VM, which stores it as the
+// foreign instance's payload with shared ownership.
 template <typename T, typename... Args>
 void ctorTrampoline(WrenVM* vm) {
   wrenEnsureSlots(vm, static_cast<int>(sizeof...(Args)) + 1);
-  void* data = wrenSetSlotNewForeign(vm, 0, 0, sizeof(ForeignWrapper));
   if constexpr (sizeof...(Args) == 0) {
-    new (data) ForeignWrapper(ForeignWrapper::make<T>());
+    vm->SetSlotNewForeignShared(0, 0, std::make_shared<T>(), &typeid(T));
   } else {
-    [data, vm]<std::size_t... Is>(std::index_sequence<Is...>) {
-      new (data) ForeignWrapper(ForeignWrapper::make<T>(
-        getArg<Args>(vm, static_cast<int>(Is) + 1)...));
+    [vm]<std::size_t... Is>(std::index_sequence<Is...>) {
+      vm->SetSlotNewForeignShared(0, 0,
+        std::make_shared<T>(getArg<Args>(vm, static_cast<int>(Is) + 1)...),
+        &typeid(T));
     }(std::index_sequence_for<Args...>{});
   }
-}
-
-// --- Finalizer (destructor) trampoline ---
-// All foreign objects use the same finalizer: destruct the ForeignWrapper,
-// which resets the shared_ptr (and destructs the C++ object if refcount hits 0).
-template <typename T>
-void finalizeTrampoline(void* data) {
-  std::launder(reinterpret_cast<ForeignWrapper*>(data))->~ForeignWrapper();
 }
 
 // --- Constructor registry: maps arg count -> constructor trampoline, per type ---
@@ -523,9 +490,24 @@ public:
     detail::CtorRegistry<T>::ctors[static_cast<int>(sizeof...(Args))] = &detail::ctorTrampoline<T, Args...>;
     reg_.allocator = &detail::ctorDispatcher<T>;
     reg_.ctorArgCounts.push_back(static_cast<int>(sizeof...(Args)));
-    // With the shared_ptr wrapper, we always need a finalizer to destruct
-    // the ForeignWrapper. Auto-register it here.
-    reg_.finalizer = &detail::finalizeTrampoline<T>;
+    // Destruction is automatic: the VM releases the shared_ptr payload when
+    // the instance is collected, so no finalizer is needed.
+    return *this;
+  }
+
+  // Declare this class manually via Module::source() (or in the importing
+  // script) instead of letting addClass() generate a bare "foreign class"
+  // declaration. Bindings still dispatch by class name.
+  Foreign<T>& noSource() {
+    reg_.manualSource = true;
+    return *this;
+  }
+
+  // Install a raw allocate function instead of the generated constructor
+  // trampolines — for allocators that can't be expressed as a C++
+  // constructor call, e.g. one that aborts the fiber.
+  Foreign<T>& allocatorRaw(WrenForeignMethodFn allocate) {
+    reg_.allocator = allocate;
     return *this;
   }
 
@@ -643,10 +625,10 @@ public:
     return *this;
   }
 
-  // With shared_ptr wrappers, finalize() is automatically handled by ctor().
-  // This method is kept for API compatibility but is now a no-op.
+  // Destruction is automatic: the VM releases the payload's shared_ptr when
+  // the instance is collected. This method is kept for API compatibility and
+  // is a no-op.
   Foreign<T>& finalize() {
-    // Already set in ctor() — nothing additional needed.
     return *this;
   }
 
@@ -674,6 +656,11 @@ public:
   }
 
   void addClass(ClassReg reg) {
+    if (reg.manualSource) {
+      // The class is declared by hand; only record it for binding dispatch.
+      reg_.classes.push_back(std::move(reg));
+      return;
+    }
     std::string src = "foreign class " + reg.className + " {\n";
     // Generate all registered constructor overloads.
     for (int numArgs : reg.ctorArgCounts) {
@@ -782,16 +769,12 @@ inline std::shared_ptr<T> WrenVM::GetShared(int slot) {
 template <typename T> inline void WrenVM::Set(int slot, T&& value) {
   using D = std::decay_t<T>;
   if constexpr (wren::detail::isWrenBuiltin_v<D>) wren::detail::Converter<D>::set(this, slot, std::forward<T>(value));
-  else {
-    void* data = wrenSetSlotNewForeign(this, slot, slot, sizeof(wren::detail::ForeignWrapper));
-    new (data) wren::detail::ForeignWrapper(wren::detail::ForeignWrapper::make<D>(std::forward<T>(value)));
-  }
+  else SetSlotNewForeignShared(slot, slot, std::make_shared<D>(std::forward<T>(value)), &typeid(D));
 }
 
 template <typename T>
 inline void WrenVM::SetShared(int slot, std::shared_ptr<T> ptr) {
-  void* data = wrenSetSlotNewForeign(this, slot, slot, sizeof(wren::detail::ForeignWrapper));
-  new (data) wren::detail::ForeignWrapper(wren::detail::ForeignWrapper::share<T>(std::move(ptr)));
+  SetSlotNewForeignShared(slot, slot, std::shared_ptr<void>(std::move(ptr)), &typeid(T));
 }
 
 #endif // wren_hpp

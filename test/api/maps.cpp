@@ -1,6 +1,7 @@
 #include <string.h>
 
 #include "maps.h"
+#include "wren_vm.h"
 
 static void newMap(WrenVM* vm)
 {
@@ -116,7 +117,7 @@ WrenForeignMethodFn mapsBindMethod(const char* signature)
 }
 
 void foreignAllocate(WrenVM* vm) {
-  wrenSetSlotNewForeign(vm, 0, 0, 0);
+  vm->SetSlotNewForeignShared(0, 0, {}, nullptr);
 }
 
 void mapBindClass(

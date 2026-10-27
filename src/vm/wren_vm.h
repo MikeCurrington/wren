@@ -10,6 +10,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <typeinfo>
 #include <unordered_map>
 
 #include "../include/wren_debugger.h"
@@ -264,6 +265,22 @@ public:
   template <typename T> void Set(int slot, T&& value);
   // Set a slot from an existing shared_ptr — shares ownership, no copy.
   template <typename T> void SetShared(int slot, std::shared_ptr<T> ptr);
+  // C++-only shared-ownership access to a slot's foreign payload: returns a
+  // copy of the payload's shared_ptr so the host can keep the object alive
+  // past collection.
+  std::shared_ptr<void> GetSlotForeignShared(int slot);
+  // Reads the foreign object in [slot] and returns a pointer to the payload
+  // it owns, or null if the instance carries no payload. The pointee stays
+  // alive as long as the foreign instance (or any shared reference to the
+  // payload) does.
+  void* GetSlotForeign(int slot);
+  // Creates a new foreign instance of the class in [classSlot], storing it in
+  // [slot] with shared ownership of [object]. When the instance is collected,
+  // the payload's shared_ptr is released. [type] is recorded for checked
+  // extraction by the C++ layer; it may be null.
+  void SetSlotNewForeignShared(int slot, int classSlot,
+                               std::shared_ptr<void> object,
+                               const std::type_info* type);
 
   void SetNull(int slot);
   int SlotCount() const;
@@ -421,13 +438,11 @@ private:
   bool GetSlotBool(int slot);
   const char* GetSlotBytes(int slot, int* length);
   double GetSlotDouble(int slot);
-  void* GetSlotForeign(int slot);
   const char* GetSlotString(int slot);
   WrenHandle* GetSlotHandle(int slot);
   void SetSlotBool(int slot, bool value);
   void SetSlotBytes(int slot, const char* bytes, size_t length);
   void SetSlotDouble(int slot, double value);
-  void* SetSlotNewForeign(int slot, int classSlot, size_t size);
   void SetSlotNewList(int slot);
   void SetSlotNewMap(int slot);
   void SetSlotString(int slot, const char* text);
@@ -533,15 +548,12 @@ private:
   friend bool wrenGetSlotBool(WrenVM* vm, int slot);
   friend const char* wrenGetSlotBytes(WrenVM* vm, int slot, int* length);
   friend double wrenGetSlotDouble(WrenVM* vm, int slot);
-  friend void* wrenGetSlotForeign(WrenVM* vm, int slot);
   friend const char* wrenGetSlotString(WrenVM* vm, int slot);
   friend WrenHandle* wrenGetSlotHandle(WrenVM* vm, int slot);
   friend void wrenSetSlotBool(WrenVM* vm, int slot, bool value);
   friend void wrenSetSlotBytes(WrenVM* vm, int slot, const char* bytes,
                                size_t length);
   friend void wrenSetSlotDouble(WrenVM* vm, int slot, double value);
-  friend void* wrenSetSlotNewForeign(WrenVM* vm, int slot, int classSlot,
-                                     size_t size);
   friend void wrenSetSlotNewList(WrenVM* vm, int slot);
   friend void wrenSetSlotNewMap(WrenVM* vm, int slot);
   friend void wrenSetSlotString(WrenVM* vm, int slot, const char* text);

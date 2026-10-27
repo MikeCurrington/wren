@@ -26,6 +26,11 @@ int main(int argc, const char* argv[]) {
   bool isAPITest = isModuleAnAPITest(testName);
 
   vm = initVM(isAPITest);
+
+  if(isAPITest) {
+    APITest_Setup(vm, testName);
+  }
+
   WrenInterpretResult result = runFile(vm, testName);
 
   if(isAPITest) {

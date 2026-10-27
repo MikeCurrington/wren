@@ -1,7 +1,9 @@
 #include <stdio.h>
 #include <string.h>
+#include <memory>
 
 #include "wren.h"
+#include "wren_vm.h"
 
 // Tests for re-entrant calls into the VM from inside foreign methods, using
 // wrenBeginCall() and wrenEndCall(). See call_nested.wren for the Wren side
@@ -387,8 +389,9 @@ static void nestedForeignAllocate(WrenVM* vm)
       ? wrenGetSlotDouble(vm, 0) : -1.0;
   wrenEndCall(vm, context);
 
-  double* data = (double*)wrenSetSlotNewForeign(vm, 0, 0, sizeof(double));
-  *data = value;
+  vm->SetSlotNewForeignShared(0, 0,
+      std::shared_ptr<double>(new double(value),
+          std::default_delete<double>()), nullptr);
 }
 
 static void nestedForeignFinalize(void* data)
@@ -399,7 +402,7 @@ static void nestedForeignFinalize(void* data)
 
 static void nestedForeignValue(WrenVM* vm)
 {
-  double* data = (double*)wrenGetSlotForeign(vm, 0);
+  double* data = static_cast<double*>(vm->GetSlotForeign(0));
   wrenSetSlotDouble(vm, 0, *data);
 }
 

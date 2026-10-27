@@ -9,8 +9,8 @@ For those cases, you can define a **foreign class**, a chimera whose state is
 half Wren and half C. It is a real Wren class with a name, constructor, and
 methods. You can define methods on it written in Wren, or [foreign methods][]
 written in C. It produces real Wren objects that you can pass around, do `is`
-checks on, etc. But it also wraps a blob of raw memory that is opaque to Wren
-but accessible from C.
+checks on, etc. But it also owns a pointer to some data in your host
+application that is opaque to Wren but accessible from C.
 
 [foreign methods]: calling-c-from-wren.html
 
@@ -25,9 +25,8 @@ foreign class Point {
 </pre>
 
 The `foreign` keyword tells Wren to loop in the host application when it
-constructs instances of the class. The host tells Wren how many bytes of extra
-memory the foreign instance should contain and in return, Wren gives the host
-the opportunity to initialize that data.
+constructs instances of the class. The host hands Wren an object to own, and
+Wren holds onto it as long as the foreign instance is reachable.
 
 To talk to the host app, Wren needs a C function it can call when it constructs
 an instance of the foreign class. This function is found through a binding
@@ -69,19 +68,18 @@ void allocate(WrenVM* vm);
 
 When you create an instance of a foreign class by calling one its
 [constructors][], Wren invokes the `allocate` callback you gave it when binding
-the foreign class. Your primary responsibility in that callback is to tell Wren
-how many bytes of raw memory you need. You do that by calling:
+the foreign class. Your primary responsibility in that callback is to create
+the native data and give it to Wren to own. You do that by calling:
 
 [constructors]: ../classes.html#constructors
 
-<pre class="snippet" data-lang="c">
-void* wrenSetSlotNewForeign(WrenVM* vm,
-    int slot, int classSlot, size_t size);
+<pre class="snippet" data-lang="cpp">
+void WrenVM::SetSlotNewForeignShared(int slot, int classSlot,
+    std::shared_ptr&lt;void&gt; object, const std::type_info* type);
 </pre>
 
-Like other [slot manipulation functions][slot], it both reads from and writes to
-the slot array. It has a few parameters to make it more general purpose since it
-can also be used in other foreign methods:
+Like the other slot methods, it both reads from and writes to the slot array.
+Its parameters are:
 
 [slot]: slots-and-handles.html
 
@@ -94,20 +92,26 @@ can also be used in other foreign methods:
   foreign class, the class itself is already in slot 0, so you'll pass 0 for
   this too.
 
-* Finally, the `size` parameter is the interesting one. Here, you pass in the
-  number of extra raw bytes of data you want the foreign instance to store.
-  This is the memory you get to play with from C.
+* The `object` parameter is the interesting one. Here, you pass a
+  `shared_ptr` to the native data the instance should own. It may point at
+  anything your host defines; Wren treats it as opaque. Pass an empty
+  `shared_ptr` if the instance carries no data.
 
-So, for example, if you wanted to create a foreign instance that contains eight
-bytes of C data, you'd call:
+* Finally, `type` records the payload's static type for the C++ layer's
+  checked extraction. Pass `nullptr` if you don't need it.
 
-<pre class="snippet" data-lang="c">
-void* data = wrenSetSlotNewForeign(vm, 0, 0, 8);
+Foreign objects are reference-counted: the VM holds one reference and releases
+it when the garbage collector reclaims the instance, and your host can hold
+its own references to keep the payload alive past collection.
+
+So, for example, to create a foreign instance that owns a heap-allocated
+`double`:
+
+<pre class="snippet" data-lang="cpp">
+vm->SetSlotNewForeignShared(0, 0,
+    std::shared_ptr&lt;double&gt;(new double(1.5),
+        std::default_delete&lt;double&gt;()), nullptr);
 </pre>
-
-The value returned by `wrenSetSlotNewForeign()` is the raw pointer to the
-requested bytes. You can cast that to whatever C type makes sense (as long as it
-fits within the requested number of bytes) and initialize it as you see fit.
 
 Any parameters passed to the constructor are also available in subsequent slots
 in the slot array. That way you can initialize the foreign data based on values
@@ -115,8 +119,8 @@ passed to the constructor from Wren.
 
 After the allocate callback returns, the class's constructor in Wren is run and
 execution proceeds like normal. From here on out, within Wren, it appears you
-have a normal instance of a class. It just happens to have some extra bytes
-hiding inside it that can be accessed from foreign methods.
+have a normal instance of a class. It just happens to hold a pointer to your
+native data that can be accessed from foreign methods.
 
 ## Accessing Foreign Data
 
@@ -124,29 +128,32 @@ Typically, the way you make use of the data stored in an instance of a foreign
 class is through other foreign methods. Those are usually defined on the same
 foreign class, but can be defined on other classes as well. Wren doesn't care.
 
-Once you have a foreign instance in a slot, you can access the raw bytes it
-stores by calling:
+Once you have a foreign instance in a slot, you can access the data it owns by
+calling:
 
-<pre class="snippet" data-lang="c">
-void* wrenGetSlotForeign(WrenVM* vm, int slot);
+<pre class="snippet" data-lang="cpp">
+void* WrenVM::GetSlotForeign(int slot);
 </pre>
 
-You pass in the slot index containing the foreign object and it gives you back a
-pointer to the raw memory the object wraps. As usual, the C API doesn't do any
-type or bounds checking, so it's on you to make sure the object in that slot
-actually *is* an instance of a foreign class and contains as much memory as you
-access.
+You pass in the slot index containing the foreign object and it gives you back
+the pointer you stored with `SetSlotNewForeignShared()`. The method doesn't do
+any type checking, so it's on you to make sure the object in that slot
+actually *is* an instance of the foreign class you expect and to cast the
+pointer back to the right type.
 
 Given that void pointer, you can now freely read and modify the data it points
-to. They're your bits, Wren just holds them for you.
+to. They're your bits, Wren just holds them for you. If you want shared
+ownership — say, to keep the payload alive after the foreign instance dies —
+`WrenVM::GetSlotForeignShared(slot)` hands you back the payload's
+`shared_ptr` itself.
 
 ## Freeing Resources
 
-If your foreign instances are just holding memory and you're OK with Wren's
-garbage collector managing the lifetime of that memory, then you're done. Wren
-will keep the bytes around as long as there is still a reference to them. When
-the instance is no longer reachable, eventually the garbage collector will do
-its thing and free the memory.
+The payload you store is a `shared_ptr`, so its lifetime ends when its last
+reference goes away: the garbage collector releases the VM's reference when
+the foreign instance is reclaimed, and any `shared_ptr` your host kept
+(copied from `GetSlotForeignShared()`) keeps the object alive until it too is
+destroyed. If the payload's type has a destructor, it runs then — plain RAII.
 
 But, often, your foreign data refers to some resource whose lifetime needs to
 be explicitly managed. For example, if you have a foreign object that wraps an
@@ -156,13 +163,15 @@ GC frees the foreign instance.
 Of course, you can (and usually should) add a method on your foreign class, like
 `close()` so the user can explicitly release the resource managed by the object.
 But if they forget to do that and the object is no longer reachable, you want to
-make sure the resource isn't leaked.
+make sure the resource isn't leaked. The payload's destructor covers that
+case.
 
-To that end, you can also provide a *finalizer* function when binding the
-foreign class. That's the other callback in the WrenForeignClassMethods struct.
-If you provide that callback, then Wren will invoke it when an instance of your
-foreign class is about to be freed by the garbage collector. This gives you one
-last chance to clean up the object's resources.
+On top of the payload's destructor, you can also provide a *finalizer* function
+when binding the foreign class. That's the other callback in the
+WrenForeignClassMethods struct. If you provide that callback, then Wren will
+invoke it when an instance of your foreign class is about to be freed by the
+garbage collector. This gives you one last chance to observe the object as it
+dies — usually to update counters or diagnostics.
 
 Because this is called during the middle of a garbage collection, you do not
 have unfettered access to the VM. It's not like a normal foreign method where
@@ -175,9 +184,9 @@ Instead, the finalize callback's signature is only:
 void finalize(void* data);
 </pre>
 
-Wren gives you the pointer to your foreign function's memory, and that's it. The
-*only* thing you should do inside a finalizer is release any external resources
-referenced by that memory.
+Wren gives you the pointer to your foreign object, and that's it. The *only*
+thing you should do inside a finalizer is release any external resources
+referenced by that object.
 
 ## A Full Example
 
@@ -250,57 +259,46 @@ WrenForeignClassMethods bindForeignClass(
 </pre>
 
 When our binding callback is invoked for the File class, we return the allocate
-and finalize functions the VM should call. Allocation looks like:
+function the VM should call. (We leave `finalize` NULL; the payload's
+destructor below handles cleanup.) Allocation looks like:
 
-<pre class="snippet" data-lang="c">
+<pre class="snippet" data-lang="cpp">
 #include &lt;stdio.h>
-#include "wren.h"
+#include &lt;memory>
+#include "wren_vm.h"
+
+// A holder for the file handle. The foreign object owns one of these, and
+// the holder owns the FILE*.
+struct FileData
+{
+  FILE* file = NULL;
+
+  ~FileData()
+  {
+    // Already closed.
+    if (file == NULL) return;
+
+    fclose(file);
+    file = NULL;
+  }
+};
 
 void fileAllocate(WrenVM* vm)
 {
-  FILE** file = (FILE**)wrenSetSlotNewForeign(vm,
-      0, 0, sizeof(FILE*));
   const char* path = wrenGetSlotString(vm, 1);
-  *file = fopen(path, "w");
+  auto data = std::make_shared&lt;FileData&gt;();
+  data-&gt;file = fopen(path, "w");
+  vm->SetSlotNewForeignShared(0, 0, data, nullptr);
 }
 </pre>
 
-First we create the instance by calling `wrenSetSlotNewForeign()`. We tell it to
-add enough extra bytes to store a `FILE*` in it, which is C's representation of
-a file handle. We're given back a pointer to the bytes. Since the file handle is
-itself a pointer, we end up with a double indirection, hence the `FILE**`. In
-most cases, you'll just have a single `*`.
-
-We also pull the file path from the slot array. Then we tell C to create a new
-file at that path. That gives us back a new file handle -- a `FILE*` -- and we
-store that back into the foreign instance using `*file`. Now we have a foreign
-object that wraps an open file handle.
-
-The finalizer simply casts the foreign instance's data back to the proper type
-and closes the file:
-
-<pre class="snippet" data-lang="c">
-void fileFinalize(void* data)
-{
-  closeFile((FILE**) data);
-}
-</pre>
-
-It uses this little utility function:
-
-<pre class="snippet" data-lang="c">
-static void closeFile(FILE** file)
-{
-  // Already closed.
-  if (*file == NULL) return;
-
-  fclose(*file);
-  *file = NULL;
-}
-</pre>
-
-This closes the file (if it's not already closed) and also nulls out the file
-handle so that we don't try to use the file after it's been closed.
+First we pull the file path from the slot array. Then we create a `FileData`
+holder for the file handle and tell C to create a new file at that path.
+Finally we hand the holder to Wren with `SetSlotNewForeignShared()`. When the
+instance is collected and no other `shared_ptr` references the holder, its
+destructor runs, which closes the file (if it's not already closed) and nulls
+out the file handle first so that we don't try to use the file after it's been
+closed.
 
 ### Binding the foreign methods
 
@@ -334,13 +332,13 @@ When Wren calls this, we look at the class and method name to figure out which
 method it's binding, and then return a pointer to the appropriate function. The
 foreign method for writing to the file is:
 
-<pre class="snippet" data-lang="c">
+<pre class="snippet" data-lang="cpp">
 void fileWrite(WrenVM* vm)
 {
-  FILE** file = (FILE**)wrenGetSlotForeign(vm, 0);
+  FileData* data = static_cast&lt;FileData*&gt;(vm->GetSlotForeign(0));
 
   // Make sure the file is still open.
-  if (*file == NULL)
+  if (data-&gt;file == NULL)
   {
     wrenSetSlotString(vm, 0, "Cannot write to a closed file.");
     wrenAbortFiber(vm, 0);
@@ -348,26 +346,29 @@ void fileWrite(WrenVM* vm)
   }
 
   const char* text = wrenGetSlotString(vm, 1);
-  fwrite(text, sizeof(char), strlen(text), *file);
+  fwrite(text, sizeof(char), strlen(text), data-&gt;file);
 }
 </pre>
 
-We use `wrenGetSlotForeign()` to pull the foreign data out of the slot array.
+We use `GetSlotForeign()` to pull the foreign data out of the slot array.
 Since this method is called on the file itself, the foreign object is in slot
-zero. We take the resulting pointer and cast it to a pointer of the proper type.
-Again, because our foreign data is *itself* a pointer, we get a pointer to a
-pointer.
+zero. We take the resulting pointer and cast it back to the proper type.
 
 We do a little sanity checking to make sure the user isn't writing to a file
 they already closed. If not, we call `fwrite()` to write to the file.
 
 The other method is `close()` to let them explicitly close the file:
 
-<pre class="snippet" data-lang="c">
+<pre class="snippet" data-lang="cpp">
 void fileClose(WrenVM* vm)
 {
-  FILE** file = (FILE**)wrenGetSlotForeign(vm, 0);
-  closeFile(file);
+  FileData* data = static_cast&lt;FileData*&gt;(vm->GetSlotForeign(0));
+
+  // Already closed.
+  if (data-&gt;file == NULL) return;
+
+  fclose(data-&gt;file);
+  data-&gt;file = NULL;
 }
 </pre>
 
