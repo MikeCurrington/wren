@@ -2,6 +2,14 @@ The benchmarks in here attempt to faithfully implement the exact same algorithm 
 
 A bit about each benchmark:
 
+### api_foreign_class
+
+Calls a foreign class instance method and getter two million times. Measures foreign method dispatch and foreign data access across the language boundary.
+
+### api_foreign_slots
+
+Passes a 100 element list into a foreign method that reads every element, and builds a new 100 element list from C++ every iteration. Measures slot marshalling overhead in both directions.
+
 ### binary_trees
 
 This benchmark stresses object creation and garbage collection. It builds a few big, deeply nested binaries and then traverses them.
@@ -9,6 +17,14 @@ This benchmark stresses object creation and garbage collection. It builds a few 
 ### fib
 
 This is just a simple naïve Fibonacci number calculator. It was the first benchmark I wrote when Wren supported little more than function calls and arithmetic. It isn't particularly representative of real-world code, but it does stress function call and arithmetic.
+
+### fiber_yield
+
+Drains a generator fiber with a million `call()`s, one value yielded per round trip. Measures the cost of resuming a fiber and yielding back.
+
+### fiber_yield_params
+
+Like fiber_yield, but a value is passed in on every resume and the generator state lives in captured upvalues. Measures round trip overhead with parameter passing and closure captures.
 
 ### for
 

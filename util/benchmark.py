@@ -57,6 +57,10 @@ BENCHMARK("api_call", "true")
 
 BENCHMARK("api_foreign_method", "100000000")
 
+BENCHMARK("api_foreign_class", "1000001000000")
+
+BENCHMARK("api_foreign_slots", "101020000")
+
 BENCHMARK("binary_trees", """stretch tree of depth 13 check: -1
 8192 trees of depth 4 check: -8192
 2048 trees of depth 6 check: -2048
@@ -82,6 +86,10 @@ BENCHMARK("fib", r"""317811
 317811""")
 
 BENCHMARK("fibers", r"""4999950000""")
+
+BENCHMARK("fiber_yield", "500000500000")
+
+BENCHMARK("fiber_yield_params", "1499999500000")
 
 BENCHMARK("for", r"""499999500000""")
 
