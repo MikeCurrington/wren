@@ -160,6 +160,43 @@ public:
 
 std::shared_ptr<Widget> Widget::root;
 
+// Test classes for shared_ptr parameters, variant values and Any capture
+
+class Node {
+public:
+  int value = 0;
+};
+
+class Host {
+public:
+  // shared_ptr parameter: writes through to the caller's instance.
+  void absorb(std::shared_ptr<Node> node, int add) { node->value += add; }
+};
+
+// Last values seen by the C++ side of the variant test.
+static int g_variantInt = -1;
+static bool g_variantBool = false;
+
+struct Packet {
+  std::variant<std::nullptr_t, int, float, bool> data;
+  void set(const std::variant<std::nullptr_t, int, float, bool>& d) {
+    data = d;
+    if (const int* i = std::get_if<int>(&data)) g_variantInt = *i;
+    if (const bool* b = std::get_if<bool>(&data)) g_variantBool = *b;
+  }
+};
+
+// Captures arbitrary Wren values (lists, fibers, ...) into a wren::Any.
+class Box {
+public:
+  wren::Any held;
+  void put(wren::Any v) { g_boxCaptured = static_cast<bool>(v); held = std::move(v); }
+  void clear() { held.reset(); }
+  static bool g_boxCaptured;
+};
+
+bool Box::g_boxCaptured = false;
+
 // The test's VM: prints to stdout, reports errors to stderr.
 struct PrintVM : wren::VM {
   using wren::VM::VM;
@@ -611,6 +648,97 @@ System.print("bumped to %(w.counter)")
   }
   printf("\n");
 #endif
+
+  // Test 15: shared_ptr parameters
+  {
+    printf("Test 15: shared_ptr parameters\n");
+    auto& mod = vm.Module("test_shared_ptr_arg");
+    auto node = mod.klass<Node>("Node");
+    node.ctor<>();
+    node.var<&Node::value>("value");
+    auto host = mod.klass<Host>("Host");
+    host.ctor<>();
+    host.func<&Host::absorb, std::shared_ptr<Node>, int>("absorb");
+  }
+
+  const char* test15Source = R"WREN(
+import "test_shared_ptr_arg" for Node, Host
+
+var n = Node.new()
+n.value = 10
+var h = Host.new()
+h.absorb(n, 5)
+System.print("value after absorb: %(n.value)")
+)WREN";
+
+  result = vm.Interpret("test15", test15Source);
+  TEST_ASSERT(result == WREN_RESULT_SUCCESS, "shared_ptr parameter test");
+  printf("\n");
+
+  // Test 16: std::variant values across the boundary
+  {
+    printf("Test 16: std::variant values\n");
+    auto& mod = vm.Module("test_variant");
+    auto packet = mod.klass<Packet>("Packet");
+    packet.ctor<>();
+    packet.varReadOnly<&Packet::data>("data");
+    packet.func<&Packet::set, std::variant<std::nullptr_t, int, float, bool>>("set");
+  }
+
+  const char* test16Source = R"WREN(
+import "test_variant" for Packet
+
+var p = Packet.new()
+
+p.set(true)
+System.print("bool data: %(p.data)")
+System.print("bool data is Bool: %(p.data is Bool)")
+
+p.set(42)
+System.print("int data: %(p.data)")
+
+p.set(1.5)
+System.print("float data: %(p.data)")
+System.print("float data is Num: %(p.data is Num)")
+
+p.set(null)
+System.print("null data is Null: %(p.data is Null)")
+)WREN";
+
+  g_variantInt = -1;
+  g_variantBool = false;
+  result = vm.Interpret("test16", test16Source);
+  TEST_ASSERT(result == WREN_RESULT_SUCCESS, "variant round trip test");
+  TEST_ASSERT(g_variantBool == true, "variant bool alternative received");
+  TEST_ASSERT(g_variantInt == 42, "variant int alternative received");
+  printf("\n");
+
+  // Test 17: capturing arbitrary Wren values with wren::Any
+  {
+    printf("Test 17: wren::Any capture\n");
+    auto& mod = vm.Module("test_any");
+    auto box = mod.klass<Box>("Box");
+    box.ctor<>();
+    box.func<&Box::put, wren::Any>("put");
+    box.func<&Box::clear>("clear");
+    box.varReadOnly<&Box::held>("held");
+  }
+
+  const char* test17Source = R"WREN(
+import "test_any" for Box
+
+var b = Box.new()
+b.put([1, 2, 3])
+System.print("held count: %(b.held.count)")
+System.print("held[2]: %(b.held[2])")
+b.clear()
+System.print("held after clear is Null: %(b.held is Null)")
+)WREN";
+
+  Box::g_boxCaptured = false;
+  result = vm.Interpret("test17", test17Source);
+  TEST_ASSERT(result == WREN_RESULT_SUCCESS, "wren::Any capture test");
+  TEST_ASSERT(Box::g_boxCaptured, "Any captured a value");
 
   // Summary
   printf("=====================================\n");

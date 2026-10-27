@@ -24,9 +24,11 @@
 // that Wren's VM expects. Each unique <method-pointer, Class, Args...> instantiation
 // generates a unique function address, enabling zero-overhead dispatch.
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <new>
 #include <string>
@@ -35,6 +37,7 @@
 #include <typeinfo>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 #include <vector>
 
 extern "C" {
@@ -80,6 +83,60 @@ struct ModuleReg {
   std::string name;
   std::vector<ClassReg> classes;
   std::string extraSource;
+};
+
+// ===========================================================================
+// Any — an owning handle to an arbitrary Wren value, captured from a slot.
+// Lets a foreign method or constructor receive values the type system can't
+// describe (lists, maps, fibers, ...): the value is pinned with
+// wrenGetSlotHandle and released when the Any is destroyed.
+//
+// Lifetime note: the captured handle is released against the VM the value
+// was captured from, so an Any (or its owner) must not outlive that VM
+// unless the host releases it first (reset()) — e.g. via a registry that
+// runs before VM teardown.
+// ===========================================================================
+class Any {
+public:
+  Any() = default;
+
+  // Captures the value in [slot].
+  Any(WrenVM* vm, int slot) : vm_(vm), h_(wrenGetSlotHandle(vm, slot)) {}
+
+  // Adopts an existing handle; it is released when the Any is destroyed.
+  Any(WrenVM* vm, WrenHandle* handle) : vm_(vm), h_(handle) {}
+
+  ~Any() { reset(); }
+
+  Any(const Any&) = delete;
+  Any& operator=(const Any&) = delete;
+  Any(Any&& o) noexcept : vm_(o.vm_), h_(o.h_) { o.vm_ = nullptr; o.h_ = nullptr; }
+  Any& operator=(Any&& o) noexcept {
+    if (this != &o) {
+      reset();
+      vm_ = o.vm_;
+      h_ = o.h_;
+      o.vm_ = nullptr;
+      o.h_ = nullptr;
+    }
+    return *this;
+  }
+
+  // Releases the captured value (against the VM it was captured from) and
+  // empties the Any. Safe on an empty Any.
+  void reset() {
+    if (vm_ != nullptr && h_ != nullptr) wrenReleaseHandle(vm_, h_);
+    vm_ = nullptr;
+    h_ = nullptr;
+  }
+
+  WrenHandle* rawHandle() const { return h_; }
+  WrenVM* vm() const { return vm_; }
+  explicit operator bool() const { return h_ != nullptr; }
+
+private:
+  WrenVM* vm_ = nullptr;
+  WrenHandle* h_ = nullptr;
 };
 
 namespace detail {
@@ -146,6 +203,15 @@ template <> struct Converter<const char*> {
   static void set(WrenVM* vm, int slot, const char* v) { wrenSetSlotString(vm, slot, v); }
 };
 
+// Captures the arbitrary Wren value in [slot] (see class Any above).
+template <> struct Converter<Any> {
+  static Any get(WrenVM* vm, int slot) { return Any(vm, slot); }
+  static void set(WrenVM* vm, int slot, const Any& v) {
+    if (v.rawHandle() != nullptr) wrenSetSlotHandle(vm, slot, v.rawHandle());
+    else wrenSetSlotNull(vm, slot);
+  }
+};
+
 // Helper concept for built-in convertible types
 template <typename T>
 inline constexpr bool isWrenBuiltin_v =
@@ -160,6 +226,20 @@ template <typename T> struct is_shared_ptr : std::false_type {};
 template <typename T> struct is_shared_ptr<std::shared_ptr<T>> : std::true_type {};
 template <typename T>
 inline constexpr bool is_shared_ptr_v = is_shared_ptr<std::decay_t<T>>::value;
+
+// Helper for std::variant detection.
+template <typename T> struct is_variant : std::false_type {};
+template <typename... Ts> struct is_variant<std::variant<Ts...>> : std::true_type {};
+template <typename T>
+inline constexpr bool is_variant_v = is_variant<std::decay_t<T>>::value;
+
+// Slot-value types: RAII wrappers around a Wren value/handle that convert
+// through their Converter like builtins (Any for arbitrary values, Handle
+// for method handles). Handle is defined below; getArg/setReturn only
+// reference it through Converter<D>, so incompleteness is fine here.
+template <typename T>
+inline constexpr bool is_slot_value_v =
+    std::is_same_v<T, Any> || std::is_same_v<T, Handle>;
 
 // ===========================================================================
 // Slot access helpers for foreign (wrapper-based) objects
@@ -181,12 +261,19 @@ inline std::shared_ptr<T> getForeignShared(WrenVM* vm, int slot) {
   return std::static_pointer_cast<T>(vm->GetSlotForeignShared(slot));
 }
 
-// Generic argument getter — handles builtins, foreign by-value/ref/ptr.
+// Generic argument getter — handles builtins, variants, slot values,
+// shared_ptr, foreign by-value/ref/ptr.
 template <typename T>
 inline decltype(auto) getArg(WrenVM* vm, int slot) {
   using D = std::decay_t<T>;
-  if constexpr (isWrenBuiltin_v<D>) {
+  if constexpr (isWrenBuiltin_v<D> || is_variant_v<D> || is_slot_value_v<D>) {
     return Converter<D>::get(vm, slot);
+  } else if constexpr (is_shared_ptr_v<D>) {
+    // shared_ptr argument: share the payload's ownership. The cast is
+    // unchecked (static_pointer_cast off the shared_ptr<void> payload) —
+    // polymorphic passes rely on the payload being the exact type or a
+    // single-inheritance layout.
+    return getForeignShared<typename D::element_type>(vm, slot);
   } else if constexpr (std::is_pointer_v<D>) {
     // Pointer argument: return address of the foreign object
     using PointedTo = std::remove_pointer_t<D>;
@@ -204,25 +291,181 @@ inline int scratchSlot(WrenVM* vm) {
 }
 
 // Fetch the Wren class registered for T (via Module::klass<T>) into a scratch
-// slot and store [object] as a new foreign instance in slot 0, recording
+// slot and store [object] as a new foreign instance in [slot], recording
 // T's static type on the instance.
 template <typename T>
-inline void setNewForeignInSlot0(WrenVM* vm, std::shared_ptr<void> object) {
-  const int classSlot = scratchSlot(vm);
+inline void setNewForeignInSlot(WrenVM* vm, int slot, std::shared_ptr<void> object) {
+  const int scratch = scratchSlot(vm);
+  const int classSlot = scratch > slot + 1 ? scratch : slot + 1;
   wrenEnsureSlots(vm, classSlot + 1);
   wrenGetVariable(vm, ClassId<T>::moduleName.c_str(), ClassId<T>::className.c_str(), classSlot);
-  vm->SetSlotNewForeignShared(0, classSlot, std::move(object), &typeid(T));
+  vm->SetSlotNewForeignShared(slot, classSlot, std::move(object), &typeid(T));
 }
 
-// Place a return value into slot 0. Builtins use their converter; shared_ptr
-// returns share ownership of the pointee; other types are foreign values,
-// moved into a new VM-owned payload. The Wren class needed for boxing is
-// looked up through the ClassId registry, because slot 0 holds the receiver
-// during instance method calls.
+// setNewForeignInSlot into slot 0 (the common return-value case).
+template <typename T>
+inline void setNewForeignInSlot0(WrenVM* vm, std::shared_ptr<void> object) {
+  setNewForeignInSlot<T>(vm, 0, std::move(object));
+}
+
+// The payload's recorded static type (the tag set when the instance was
+// created through SetSlotNewForeignShared), or null when it carries none.
+inline const std::type_info* slotForeignType(WrenVM* vm, int slot) {
+  const Value value = vm->ApiStack()[slot];
+  if (!IS_FOREIGN(value)) return nullptr;
+  return AS_FOREIGN(value)->type;
+}
+
+// ===========================================================================
+// Converter<std::variant<Ts...>> — maps a dynamically typed Wren slot onto
+// a variant of the alternatives the host is prepared to receive.
+//
+// get() dispatches on the slot's Wren type:
+//   null    -> the first nullptr_t / monostate alternative
+//   bool    -> the bool alternative
+//   num     -> the first integral alternative that holds the value
+//              losslessly, else the first floating alternative
+//   string  -> the first string-ish alternative
+//   foreign -> the first alternative whose (element) type matches the
+//              payload's recorded static type exactly
+// set() visits the active alternative and pushes it back out: null-ish
+// alternatives as null, arithmetic/string alternatives through their
+// converter, shared_ptr<X> as a shared foreign instance, other class
+// alternatives as a foreign copy.
+// ===========================================================================
+template <typename T> struct IsNullish : std::bool_constant<
+    std::is_same_v<T, std::nullptr_t> || std::is_same_v<T, std::monostate>> {};
+template <typename T> struct IsStringish : std::bool_constant<
+    std::is_same_v<T, std::string> || std::is_same_v<T, std::string_view> ||
+    std::is_same_v<T, const char*>> {};
+
+template <typename... Ts>
+struct Converter<std::variant<Ts...>> {
+  using V = std::variant<Ts...>;
+
+  // Index of the first alternative satisfying predicate template P, or -1.
+  template <template <typename> class P, std::size_t I = 0>
+  static constexpr int find() {
+    if constexpr (I >= sizeof...(Ts)) return -1;
+    else if constexpr (P<std::variant_alternative_t<I, V>>::value) return static_cast<int>(I);
+    else return find<P, I + 1>();
+  }
+
+  static V get(WrenVM* vm, int slot) {
+    switch (wrenGetSlotType(vm, slot)) {
+      case WREN_TYPE_BOOL: {
+        constexpr int B = find<IsBool>();
+        if constexpr (B >= 0) return V(std::in_place_index<B>, wrenGetSlotBool(vm, slot));
+        else return V{};
+      }
+      case WREN_TYPE_NUM:
+        return getNum(vm, slot);
+      case WREN_TYPE_STRING: {
+        constexpr int S = find<IsStringish>();
+        if constexpr (S >= 0) return V(std::in_place_index<S>, Converter<std::variant_alternative_t<S, V>>::get(vm, slot));
+        else return V{};
+      }
+      case WREN_TYPE_NULL: {
+        constexpr int N = find<IsNullish>();
+        if constexpr (N >= 0) return V(std::in_place_index<N>);
+        else return V{};
+      }
+      case WREN_TYPE_FOREIGN:
+        return getForeignValue<0>(vm, slot);
+      default:
+        return V{};
+    }
+  }
+
+  static void set(WrenVM* vm, int slot, const V& v) {
+    std::visit([vm, slot](auto&& arg) {
+      using A = std::decay_t<decltype(arg)>;
+      if constexpr (IsNullish<A>::value) {
+        wrenSetSlotNull(vm, slot);
+      } else if constexpr (is_shared_ptr_v<A>) {
+        setNewForeignInSlot<typename A::element_type>(vm, slot, std::shared_ptr<void>(arg));
+      } else if constexpr (isWrenBuiltin_v<A>) {
+        Converter<A>::set(vm, slot, arg);
+      } else {
+        setNewForeignInSlot<A>(vm, slot, std::make_shared<A>(arg));
+      }
+    }, v);
+  }
+
+private:
+  template <typename T> struct IsBool : std::is_same<T, bool> {};
+
+  template <std::size_t I = 0>
+  static V getNum(WrenVM* vm, int slot) {
+    const double d = wrenGetSlotDouble(vm, slot);
+    return numAlt<I>(d);
+  }
+
+  // First integral alternative holding d losslessly, else first floating.
+  template <std::size_t I = 0>
+  static V numAlt(double d) {
+    if constexpr (I >= sizeof...(Ts)) {
+      constexpr int F = find<IsFloating>();
+      if constexpr (F >= 0) {
+        return V(std::in_place_index<F>,
+                 static_cast<std::variant_alternative_t<F, V>>(d));
+      } else {
+        return V{};
+      }
+    } else {
+      using A = std::variant_alternative_t<I, V>;
+      if constexpr (std::is_integral_v<A> && !std::is_same_v<A, bool>) {
+        if (std::floor(d) == d &&
+            d >= static_cast<double>(std::numeric_limits<A>::min()) &&
+            d <= static_cast<double>(std::numeric_limits<A>::max())) {
+          return V(std::in_place_index<I>, static_cast<A>(d));
+        }
+      }
+      return numAlt<I + 1>(d);
+    }
+  }
+
+  template <typename T> struct IsFloating : std::is_floating_point<T> {};
+
+  // Foreign slot: first alternative whose (element) type matches the
+  // payload's recorded static type exactly.
+  template <std::size_t I = 0>
+  static V getForeignValue(WrenVM* vm, int slot) {
+    const std::type_info* t = slotForeignType(vm, slot);
+    if (t == nullptr) return V{};
+    return foreignAlt<I>(*t, vm, slot);
+  }
+
+  template <std::size_t I = 0>
+  static V foreignAlt(const std::type_info& t, WrenVM* vm, int slot) {
+    if constexpr (I >= sizeof...(Ts)) {
+      return V{};
+    } else {
+      using A = std::variant_alternative_t<I, V>;
+      if constexpr (is_shared_ptr_v<A>) {
+        if (t == typeid(typename A::element_type)) {
+          return V(std::in_place_index<I>,
+                   getForeignShared<typename A::element_type>(vm, slot));
+        }
+      } else if constexpr (std::is_class_v<A> && !IsStringish<A>::value) {
+        if (t == typeid(A)) {
+          return V(std::in_place_index<I>, getForeign<A>(vm, slot));
+        }
+      }
+      return foreignAlt<I + 1>(t, vm, slot);
+    }
+  }
+};
+
+// Place a return value into slot 0. Builtins, variants and slot values use
+// their converter; shared_ptr returns share ownership of the pointee; other
+// types are foreign values, moved into a new VM-owned payload. The Wren
+// class needed for boxing is looked up through the ClassId registry,
+// because slot 0 holds the receiver during instance method calls.
 template <typename T>
 inline void setReturn(WrenVM* vm, T&& value) {
   using D = std::decay_t<T>;
-  if constexpr (isWrenBuiltin_v<D>) {
+  if constexpr (isWrenBuiltin_v<D> || is_variant_v<D> || is_slot_value_v<D>) {
     Converter<D>::set(vm, 0, std::forward<T>(value));
   } else if constexpr (is_shared_ptr_v<D>) {
     using X = typename D::element_type;
@@ -467,6 +710,17 @@ private:
   void release() { if (vm_ && h_) wrenReleaseHandle(vm_, h_); }
   WrenVM* vm_ = nullptr;
   WrenHandle* h_ = nullptr;
+};
+
+// A Handle argument captures the method receiver/value in the slot as a
+// call handle; a Handle return stores it back. Used for passing callable
+// values (e.g. fibers) through the boundary.
+template <> struct detail::Converter<Handle> {
+  static Handle get(WrenVM* vm, int slot) { return Handle(vm, wrenGetSlotHandle(vm, slot)); }
+  static void set(WrenVM* vm, int slot, const Handle& h) {
+    if (h.raw() != nullptr) wrenSetSlotHandle(vm, slot, h.raw());
+    else wrenSetSlotNull(vm, slot);
+  }
 };
 
 // ===========================================================================
